@@ -65,36 +65,38 @@ class boundary_condition:
         self.id = id
 
 # General condition for defining velocity
-class velocity_bc(boundary_condition):
+class zou_he_velocity_bc(boundary_condition):
     def __init__(self,id:int,velocity) -> None:
         super().__init__(id)
         # TODO
         # The bc float precision should match the given precision
         self.velocity = velocity
 
-class pressure_bc(boundary_condition):
+class zou_he_pressure_bc(boundary_condition):
     def __init__(self,id:int,pressure:float) -> None:
         super().__init__(id)
         # TODO
         # The bc float precision should match the given precision
         self.pressure = pressure
 
-class periodic_bc(boundary_condition):
+class guo_pressure_bc(boundary_condition):
+    def __init__(self,id:int,pressure:float) -> None:
+        super().__init__(id)
+        # TODO
+        # The bc float precision should match the given precision
+        self.pressure = pressure
+
+class periodic_bc_x(boundary_condition):
     def __init__(self,id:int) -> None:
         super().__init__(id)
-        match self.id:
-            case 0:
-                self.periodic_id = 2
-            case 1:
-                self.periodic_id = 3
-            case 2:
-                self.periodic_id = 0
-            case 3:
-                self.periodic_id = 1
-            case 4:
-                self.periodic_id = 5
-            case 5:
-                self.periodic_id = 4
+
+class periodic_bc_y(boundary_condition):
+    def __init__(self,id:int) -> None:
+        super().__init__(id)
+
+class periodic_bc_z(boundary_condition):
+    def __init__(self,id:int) -> None:
+        super().__init__(id)
 
 class no_slip_wall_bc(boundary_condition):
     def __init__(self,id:int) -> None:
@@ -123,20 +125,77 @@ class mrt(collision_operator):
         super().__init__(c_type)
 
 # --------------------------#
+# Body Force
+
+class body_force:
+    def __init__(self,force) -> None:
+        self.force = force
+
+class guo_body_force(body_force):
+    def __init__(self, force) -> None:
+        super().__init__(force)
+
+# Unit conversion from SI to Lattice units and vice versa
+# delta x = 1, delta t = 1 in lattice units
+class ScaleParameters:
+    def __init__(self,dx,dt,physical_density) -> None:
+        self.dt = dt
+        self.C_rho = physical_density
+        self.C_u = dx/dt
+        
+def unit_converter_resolution_relax_parameter(dx,tau_star,physical_viscosity,physical_density,characteristic_physical_velocity,characteristic_length):
+    nu_star = (1/3) * (tau_star - 1/2) # Non-dimensional viscosity
+    lc_star = characteristic_length / dx # Non-dimensional characteristic length
+    Re = characteristic_physical_velocity * characteristic_length / physical_viscosity
+    u_lattice = Re * nu_star / lc_star
+    if u_lattice > 0.577:
+        print("The expected lattice velocity exceeds the speed of sound. Please change the parameters")
+        exit(1)
+    else:
+        dt = (1/3) * (tau_star - 0.5) * dx * dx / physical_viscosity
+        return ScaleParameters(dx,dt,physical_density)
+
+def unit_converter_resolution_lattice_velocity(dx,lattice_velocity,physical_viscosity,physical_density,characteristic_physical_velocity,characteristic_length):
+    if lattice_velocity > 0.577:
+        print("The expected lattice velocity exceeds the speed of sound. Please change the parameters")
+        exit(1)
+    else:
+        lc_star = characteristic_length / dx # Non-dimensional characteristic length
+        Re = characteristic_physical_velocity * characteristic_length / physical_viscosity
+        nu_star = lattice_velocity * lc_star / Re
+        tau_star = 3*nu_star + 1/2
+        dt = (1/3) * (tau_star - 0.5) * dx * dx / physical_viscosity
+        return ScaleParameters(dx,dt,physical_density)
+
+def unit_converter_lattice_velocity_relax_parameter(lattice_velocity,tau_star,physical_viscosity,physical_density,characteristic_physical_velocity,characteristic_length):
+    if lattice_velocity > 0.577:
+        print("The expected lattice velocity exceeds the speed of sound. Please change the parameters")
+        exit(1)
+    else:
+        nu_star = (1/3) * (tau_star - 1/2) # Non-dimensional viscosity
+        Re = characteristic_physical_velocity * characteristic_length / physical_viscosity
+        lc_star =  Re * nu_star / lattice_velocity
+        dx = characteristic_length / lc_star
+        dt = (1/3) * (tau_star - 0.5) * dx * dx / physical_viscosity
+        return ScaleParameters(dx,dt,physical_density)
+
+# --------------------------#
 # Single Phase Problem Definition
+# The combination of dx, dt and density (rho) serve as independent unit for non-dimensionalization
+# The lattice density is scaled using the value provided in BC
 class single_phase_problem:
     def __init__(
         self,model_type_:model_type,collision_type:collision_operator,
-        boundary_conditions:list,dx:float,dt:float,nu:float,
-        max_timesteps:int,write_start:float,write_control:float,force=[0.0,0.0]
+        boundary_conditions:list,tau_star:float,scale_parameters:ScaleParameters,
+        total_time:float,write_start:float,write_control:float,force=[0.0,0.0]
     ) -> None:
         self.model_type_ = model_type_   
         self.collision_type = collision_type
         self.boundary_conditions = boundary_conditions #list of boundary_condition
-        self.dx = dx
-        self.dt = dt
-        self.nu = nu
-        self.max_timesteps = max_timesteps
+        self.tau_star = tau_star
+        self.scale_parameters = scale_parameters
+        self.total_time = total_time
         self.write_start = write_start
         self.write_control = write_control
         self.force = force # list of float
+
