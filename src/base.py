@@ -3,6 +3,7 @@ from jax import jit
 import jax.numpy as jnp
 import numpy as np
 from body_force import *
+from utilities import *
 import time
 
 class LBMBase(object):
@@ -30,6 +31,9 @@ class LBMBase(object):
                 Initial value of density at each grid point. Dimension: (nx,ny,2) or (nx,ny,nz,2). Default: 0.0 for all grid points
             conv_param: ConversionParameter
                 Conversion parameters to convert between Lattice Units and SI units
+            filename_prefix: str
+                Prefix used in the exported VTK file. Add relative folder location to save in a different file.
+                The final filename will be: filename_prefix-timestep.vtk Default: ./output-timestep.vtk
             write_start: int
                 Timestep at which the export of data is started
             write_control: int
@@ -58,6 +62,7 @@ class LBMBase(object):
             self.rho0 = kwargs.get("rho0")
             self.u0 = kwargs.get("u0")
             self.conv_param = kwargs.get("conv_param")
+            self.filename_prefix = kwargs.get("filename_prefix","./output")
             self.write_start = kwargs.get("write_start")
             self.write_control = kwargs.get("write_control")
             self.create_log = kwargs.get("create_log",True)
@@ -197,7 +202,7 @@ class LBMBase(object):
             t_total += (t_end - t_start)
 
             if (t - self.write_start > 0) and ((t - self.write_start) % self.write_control == 0):
-                write_vtk(rho,u,self.conv_param,self.precision)
+                write_vtk(rho,u,self.conv_param,self.lattice,self.precision)
 
         if self.compute_MLUPS:
             mlups = self.calculate_MLUPS(t_total)
