@@ -25,7 +25,10 @@ def read_raw_file(filename,width,height,depth=0,data_type=np.uint8):
   with open(filename, 'rb') as file:
       raw_data = np.frombuffer(file.read(),dtype=data_type)
   
-  mask = raw_data.reshape((depth,width,height))
+  if depth == 0:
+    mask = raw_data.reshape((width,height))
+  else:
+    mask = raw_data.reshape((width,height,depth))
   return mask
 
 #TODO
@@ -60,8 +63,8 @@ def write_vtk(filename_prefix,time_step,rho,u,conv_param,lattice,precision):
   grid.spacing = (conv_param.C_l,conv_param.C_l,conv_param.C_l) 
 
   # Transfer the arrays to the memory from the host
-  p_cpu = jnp.asnumpy(p)
-  u_cpu = jnp.asnumpy(u)
+  p_cpu = jnp.asnumpy(rho) * conv_param.C_rho * lattice.c_s2
+  u_cpu = jnp.asnumpy(u) * conv_param.C_l / conv_param.C_t
 
   grid["p"] = p_cpu.flatten(order='F')
   if lattice.d == 2:
@@ -70,5 +73,6 @@ def write_vtk(filename_prefix,time_step,rho,u,conv_param,lattice,precision):
   else:
     grid["ux"] = u_cpu[:,:,:,0].flatten(order='F')
     grid["uy"] = u_cpu[:,:,:,1].flatten(order='F')
+    grid["uz"] = u_cpu[:,:,:,2].flatten(order='F')
 
   grid.save(filename_prefix+time_step+".vtk")

@@ -62,7 +62,7 @@ class DoNothing(BoundaryCondition):
 
     @partial(jit, static_argnums=(0,))
     def apply(self,fout,fin):
-        return fin[self.boundary_indices]
+        return fin
 
 class HalfwayBounceBack(BoundaryCondition):
     """

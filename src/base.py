@@ -202,7 +202,7 @@ class LBMBase(object):
             t_total += (t_end - t_start)
 
             if (t - self.write_start > 0) and ((t - self.write_start) % self.write_control == 0):
-                write_vtk(rho,u,self.conv_param,self.lattice,self.precision)
+                write_vtk(self.filename_prefix,t,rho,u,self.conv_param,self.lattice,self.precision)
 
         if self.compute_MLUPS:
             mlups = self.calculate_MLUPS(t_total)
