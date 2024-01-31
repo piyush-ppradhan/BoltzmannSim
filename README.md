@@ -1,6 +1,6 @@
 # JLBM: High-Performance Lattice Boltzmann Simulation
 
-JLBM is a high-performance 2D/3D Lattice Boltzmann Method (LBM) library that can be run on accelerated hardware(GPU, TPU). It is written using the [JAX](https://github.com/google/jax) library.
+JLBM is a high-performance 2D/3D Lattice Boltzmann Method (LBM) library that can be run on accelerated hardware (GPU, TPU). It is written using the [JAX](https://github.com/google/jax) library.
 
 ## Features
     1. Single Phase Flows
@@ -13,4 +13,4 @@ JLBM is a high-performance 2D/3D Lattice Boltzmann Method (LBM) library that can
     3. numpy
     4. functools
 
-    To install the dependencies, use the following command: `pip install pyvista numpy functools`
+To install the dependencies, use the following command: `pip install pyvista numpy functools`
