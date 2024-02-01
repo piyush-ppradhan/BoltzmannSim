@@ -178,13 +178,14 @@ class LBMBase(object):
         f = self.apply_boundary_conditions(f)
         f = self.stream(f)
         f = self.apply_boundary_conditions(f)
+        f = self.body_force.apply(f,rho,u)
         if isinstance(self.body_force,NoBodyForce):
             rho, u = self.compute_macroscopic_variables(f)
         elif isinstance(self.body_force,ShanChenForce):
             rho, u = self.compute_macroscopic_variables(f)
-            rho, u = self.body_force.apply(rho,u)
+            rho, u = self.body_force.apply(f,rho,u)
         elif isinstance(self.body_force,GuoBodyForce):
-            f = self.body_force.apply(f)
+            f = self.body_force.apply(f,rho,u)
             rho, u = self.compute_macroscopic_variables(f)
         else:
             TypeError("Invalid body force type. Valid body forces type are: NoBodyForce(default), ShanChenForce, GuoBodyForce")

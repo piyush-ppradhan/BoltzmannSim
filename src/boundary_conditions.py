@@ -26,6 +26,10 @@ class BoundaryCondition(object):
                 Precision to be used for computation. Possible values: "f16", "f32", "f64". Default: "f32"
             boundary_indices: array[tuple]
                 Indices of the boundary nodes. Stored as array of tuple
+            is_solid: bool
+                Whether the boundary condition is defined for a solid boundary
+            implementation_step: str
+                Define when the boundary condition is applied. Possible values: "pre_collision", "post_collision". Defined in subclass
     """
     def __init__(self,lattice,boundary_indices,precision,nx,ny,nz=0):
         self.lattice = lattice

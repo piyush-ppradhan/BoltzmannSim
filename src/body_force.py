@@ -9,13 +9,34 @@ class BodyForce(object):
         Attributes:
             F: array[float]
                 Volumetric body forces defined in SI units. To convert the body force to Lattice Units, CoversionParameters are used internally
+            implementation_step: str
+                Defines the data on which the boundary condition is applied. Possible values: "none", "velocity", "distribution". Values are defined in sub-classes.
     """
     def __init__(self,F):
         self.F = F
+    
+    @partial(jit, static_argnums=(0,3))
+    def apply(self,f,rho,u,precision):
+        """
+            Apply the body force to the respective data depending on the force model used. Defined in sub-class.
+            
+            Arguments:
+                f: array[float]
+                    Distribution values at all grid points.
+                rho: array[float]
+                    Density at all grid points.
+                u: array[float]
+                    Velocity at all grid points.
+        """
+        pass
 
 class NoBodyForce(BodyForce):
     def __init__(self):
         super().__init__([0.0,0.0,0.0]) # Actual dimension of the force array does not matter, it is simply ignored
+    
+    @partial(jit, static_argnums=(0,3))
+    def apply(self,f,rho,u):
+        return f, rho, u
 
 class ShanChenForce(BodyForce):
     """
@@ -28,18 +49,22 @@ class ShanChenForce(BodyForce):
     def __init__(self,F):
         super().__init__(F)
 
-    @partial(jit, static_argnums=(0,2), donate_argnums=(2,))
-    def apply(self,rho,u,precision=jnp.float32):
+    @partial(jit, static_argnums=(0,2), donate_argnums=(3,))
+    def apply(self,f,rho,u,precision=jnp.float32):
         """
             Apply the body force to the velocity as per the Shan-Chen method
             
             Arguments:
-                 u: array[float]
-                    jax.numpy array storing the velocity at all grid points
+                f: array[float] 
+                    Distribution values at all grid points.
+                rho: array[float]
+                    Density values at all grid points.
+                u: array[float]
+                    Velocity at all grid points.
         """
         F = jnp.array(self.F,dtype=precision)
         u = u + F / rho
-        return u
+        return f, rho, u
 
 #TODO
 class GuoBodyForce(BodyForce):
@@ -65,7 +90,18 @@ class GuoBodyForce(BodyForce):
         self.B = kwargs.get("B",F)
         self.C = kwargs.get("C")
 
-    @partial(jit, static_argnums=(0,1), donate_argnums=(1,))
-    def apply(self,f):
+    @partial(jit, static_argnums=(0,3), donate_argnums=(1,))
+    def apply(self,f,rho,u,precision):
+        """
+            Apply the body force to the velocity as per the Guo method.
+            
+            Arguments:
+                f: array[float]
+                    Distribution values at all grid points.
+                rho: array[float]
+                    Density values at all grid points.
+                u: array[float]
+                    Velocity at all grid points.
+        """
         pass
 
