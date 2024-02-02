@@ -9,7 +9,7 @@ class BoundaryCondition(object):
         Implemented Boundary Condition:
             1. DoNothing
             2. Zou-He Pressure and Velocity BC
-            3. Halfway-Bounceback BC
+            3. Halfway Bounce-back BC
 
         Attributes:
             lattice: Lattice
@@ -32,7 +32,7 @@ class BoundaryCondition(object):
                 Whether the boundary condition is dynamic i.e., it changes over time. For example, moving wall boundary condition.
             implementation_step: str
                 Define when the boundary condition is applied. Possible values: "pre_collision", "post_collision". Set in sub-class
-            needs_extra_implementation: bool
+            needs_extra_configuration: bool
                 Whether the boundary condition needs extra information (for example, the velocity boundary condition). Set in sub-class
     """
     def __init__(self,lattice,boundary_indices,precision,nx,ny,nz=0):
@@ -51,6 +51,173 @@ class BoundaryCondition(object):
             case _:
                 ValueError("Invalid precision type. Valid precision type are: \"f16\", \"f32\", \"f64\"")
     
+    def create_local_mask_and_normal_arrays(self, grid_mask):
+        """
+            Creates local mask and normal arrays for the boundary condition.
+
+            Arguments: 
+                grid_mask : Array-like
+                    The grid mask for the lattice.
+
+            Returns:
+                None
+
+            This method creates local mask and normal arrays for the boundary condition based on the grid mask.
+            If the boundary condition requires extra configuration, the `configure` method is called.
+        """
+        if self.needs_extra_configuration:
+            boundary_mask = self.get_boundary_mask(grid_mask)
+            self.configure(boundary_mask)
+            self.needs_extra_configuration = False
+
+        boundary_mask = self.get_boundary_mask(grid_mask)
+        self.normals = self.get_normals(boundary_mask)
+        self.imissing, self.iknown = self.get_missing_indices(boundary_mask)
+        self.imissing_mask, self.iknown_mask, self.imiddle_mask = self.get_missing_mask(boundary_mask)
+
+        return 
+
+    def get_boundary_mask(self, grid_mask):  
+        """
+            Add jax.device_count() to the self.indices in x-direction, and 1 to the self.indices other directions
+            This is to make sure the boundary condition is applied to the correct nodes as grid_mask is
+            expanded by (jax.device_count(), 1, 1)
+
+            Parameters:
+                grid_mask : array-like
+                    The grid mask for the lattice.
+            
+            Returns:
+                boundaryMask : array-like
+        """   
+        shifted_indices = np.array(self.indices)
+        shifted_indices[0] += device_count()
+        shifted_indices[1:] += 1
+        # Convert back to tuple
+        shifted_indices = tuple(shifted_indices)
+        boundaryMask = np.array(grid_mask[shifted_indices])
+
+        return boundaryMask
+
+    def configure(self, boundary_mask):
+        """
+        Configures the boundary condition.
+
+            Parameters:
+                boundary_mask : array-like
+                    The grid mask for the boundary voxels.
+
+            Returns:
+                None 
+
+            This method should be overridden in subclasses if the boundary condition requires extra configuration.
+        """
+        return
+
+    @partial(jit, static_argnums=(0, 3), inline=True)
+    def prepare_populations(self, fout, fin, implementation_step):
+        """
+            Prepares the distribution functions for the boundary condition. Defined in sub-class.
+
+            Parameters:
+                fout : jax.numpy.ndarray
+                    The incoming distribution functions.
+                fin : jax.numpy.ndarray
+                    The outgoing distribution functions.
+                implementation_step : str
+                    The step in the lattice Boltzmann method algorithm at which the preparation is applied.
+
+            Returns:
+                fout: jax.numpy.ndarray
+                    The prepared distribution functions.
+       """   
+        return fout
+
+    def get_normals(self, boundary_mask):
+        """
+            Calculates the normal vectors at the boundary nodes.
+
+            Parameters:
+                boundary_mask : array-like
+                    The boundary mask for the lattice.
+
+            Returns:
+                normals: array-like
+                    The normal vectors at the boundary nodes.
+
+            This method calculates the normal vectors by dotting the boundary mask with the main lattice directions.
+        """
+        main_c = self.lattice.c.T[self.lattice.main_indices]
+        m = boundary_mask[..., self.lattice.main_indices]
+        normals = -np.dot(m, main_c)
+        return normals
+
+    def get_missing_indices(self, boundary_mask):
+        """
+            Returns two int8 arrays the same shape as boundary_mask. The non-zero entries of these arrays indicate missing
+            directions that require BCs (imissing) as well as their corresponding opposite directions (iknown).
+
+            Parameters:
+                boundary_mask : array-like
+                    The boundary mask for the lattice.
+
+            Returns:
+                tuple of array-like
+                    The missing and known indices for the boundary condition.
+
+            This method calculates the missing and known indices based on the boundary mask. The missing indices are the
+            non-zero entries of the boundary mask, and the known indices are their corresponding opposite directions.
+        """
+
+        # Find imissing, iknown 1-to-1 corresponding indices
+        # Note: the "zero" index is used as default value here and won't affect BC computations
+        nbd = len(self.boundary_indices[0])
+        imissing = np.vstack([np.arange(self.lattice.q, dtype='uint8')] * nbd)
+        iknown = np.vstack([self.lattice.opp_indices] * nbd)
+        imissing[~boundary_mask] = 0
+        iknown[~boundary_mask] = 0
+        return imissing, iknown
+
+    def get_missing_mask(self, boundary_mask):
+        """
+            Returns three boolean arrays the same shape as boundary_mask. Useful for reduction (eg. summation) operators of selected q-directions.
+
+            Parameters:
+                boundary_mask : array-like
+                    The boundary mask for the lattice.
+
+            Returns:
+                tuple of array-like
+                    The missing, known, and middle masks for the boundary condition.
+
+            This method calculates the missing, known, and middle masks based on the boundary mask. The missing mask is the boundary mask, the known mask is the opposite directions of the missing mask, 
+            and the middle mask is the directions that are neither missing nor known.
+        """
+        imissing_mask = boundary_mask
+        iknown_mask = imissing_mask[:, self.lattice.opposite_indices]
+        imiddle_mask = ~(imissing_mask | iknown_mask)
+        return imissing_mask, iknown_mask, imiddle_mask
+
+
+    @partial(jit, static_argnums=(0,))
+    def equillibrium(self,rho,u):
+        """
+            Compute the equillibrium distribution for given density (rho) and velocity (u) values.
+            Used for applying the Zou-He boundary condition.
+
+            Returns:
+                feq: Array-like
+                    The equillibrium distribution.
+        """
+        e = self.lattice.e
+        w = self.lattice.w
+
+        udote = jnp.dot(u,e)
+        udotu = jnp.square(u)
+        feq = w * rho * (1.0 + 3.0 * udote + 4.5 * udote**2 - 1.5 * udotu)
+        return feq
+
+
     @partial(jit, static_argnums=(0,))
     def apply(self,fout,fin):
         """
@@ -81,6 +248,10 @@ class HalfwayBounceBack(BoundaryCondition):
     """
     def __init__(self,lattice,indices,precision,nx,ny,nz=0):
         super().__init__(lattice,indices,precision,nx,ny,nz)
+        self.is_dynamic = False
+        self.is_solid = True
+        self.needs_extra_configuration = False
+        self.implementation_step = "post_collision"
 
     @partial(jit, static_argnums=(0,))
     def apply(self,fout,fin):
@@ -90,10 +261,13 @@ class ZouHe(BoundaryCondition):
     """
         Implement the Zou-He pressure and velocity boundary condition.
         Zou, Qisu, and Xiaoyi He. “On Pressure and Velocity Boundary Conditions for the Lattice Boltzmann BGK Model.” 
-        Physics of Fluids 9, no. 6 (June 1, 1997): 1591–98. https://doi.org/10.1063/1.869307.
+        Physics of Fluids 9, no. 6 (June 1, 1997): 1591-98. https://doi.org/10.1063/1.869307.
     """
     def __init__(self,bc_density,lattice,indices,precision,nx,ny,nz=0):
         super().__init__(lattice,indices,precision,nx,ny,nz)
+        self.is_solid = False
+        self.is_dynamic = False
+        self.needs_extra_configuration = True
     
     @partial(jit, static_argnums=(0,))
     def apply(self,fout,fin):
