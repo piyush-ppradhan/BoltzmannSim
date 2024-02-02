@@ -5,14 +5,13 @@ class ConversionParameters(object):
 
         For more details, refer to "The Lattice Boltzmann Method: Principles and Practice" by Krüger et. al
         
-        Attributes
-        **********
-        C_l: float
-            Scaling factor for length
-        C_t: float
-            Scaling factor for time
-        C_rho: float
-            Scaling factor for density
+        Attributes:
+            C_l: float
+                Scaling factor for length
+            C_t: float
+                Scaling factor for time
+            C_rho: float
+                Scaling factor for density
     """
     def __init__(self):
         pass
@@ -22,21 +21,23 @@ class ConversionParameters(object):
             Compute the conversion parameters, given Re,l_charasteristic,u_characteristic,rho,nu,dx,tau_star where:
             
             Arguments
-            *********
-            l_charasteristic: float
-                Charateristic length of the flow {SI units} 
-            u_characteristic: float
-                Characteristic velocity of the flow {SI units}
-            rho: float
-                Density of the fluid {SI units}
-            nu: float
-                Kinematic viscosity of fluid {SI units}
-            dx: float
-                Lattice spacing {SI units}. Must be choosen to resolve necessary flow features
-            tau_star: float
-                Non-dimensional time parameter {SI units}. For stability and accuracy 0.5 < tau_star < 1.0
-            lattice: Lattice
-                Lattice defined using the subclasses of "Lattice" class defined in lattice.py
+                l_charasteristic: float
+                    Charateristic length of the flow {SI units} 
+                u_characteristic: float
+                    Characteristic velocity of the flow {SI units}
+                rho: float
+                    Density of the fluid {SI units}
+                nu: float
+                    Kinematic viscosity of fluid {SI units}
+                dx: float
+                    Lattice spacing {SI units}. Must be choosen to resolve necessary flow features
+                tau_star: float
+                    Non-dimensional time parameter {SI units}. For stability and accuracy 0.5 < tau_star < 1.0
+                lattice: Lattice
+                    Lattice defined using the subclasses of "Lattice" class defined in lattice.py
+
+            Returns:
+                None
         """
         self.C_l = dx
         self.C_rho = rho
@@ -55,24 +56,26 @@ class ConversionParameters(object):
         """
             Compute the conversion parameters, given Re,l_charasteristic,u_characteristic,rho,nu,dt,tau_star where:
 
-                Arguments
-            *********
-            l_charasteristic: float
-                Charateristic length of the flow {SI units} 
-            u_characteristic: float
-                Characteristic velocity of the flow {SI units}
-            rho: float
-                Density of the fluid {SI units}
-            nu: float
-                Kinematic viscosity of fluid {SI units}
-            dx: float
-                Lattice spacing {SI units}. Must be choosen to resolve necessary flow features
-            dt: float
-                Timestep used for simulation {SI units}. Must be choosen to resolve necessary flow features
-            tau_star: float
-                Non-dimensional time parameter {SI units}. For stability and accuracy 0.5 < tau_star < 1.0
-            lattice: Lattice
+            Arguments:
+                l_charasteristic: float
+                    Charateristic length of the flow {SI units} 
+                u_characteristic: float
+                    Characteristic velocity of the flow {SI units}
+                rho: float
+                    Density of the fluid {SI units}
+                nu: float
+                    Kinematic viscosity of fluid {SI units}
+                dx: float
+                    Lattice spacing {SI units}. Must be choosen to resolve necessary flow features
+                dt: float
+                    Timestep used for simulation {SI units}. Must be choosen to resolve necessary flow features
+                tau_star: float
+                    Non-dimensional time parameter {SI units}. For stability and accuracy 0.5 < tau_star < 1.0
+                lattice: Lattice
                 Lattice defined using the subclasses of "Lattice" class defined in lattice.py
+            
+            Returns:
+                None
         """
         self.C_t = dt
         self.C_rho = rho
@@ -91,22 +94,24 @@ class ConversionParameters(object):
         """
             Compute the conversion parameters, given Re,l_charasteristic,u_characteristic,rho,nu,dx,dt where:
 
-                Arguments
-            *********
-            l_charasteristic: float
-                Charateristic length of the flow {SI units} 
-            u_characteristic: float
-                Characteristic velocity of the flow {SI units}
-            rho: float
-                Density of the fluid {SI units}
-            nu: float
-                Kinematic viscosity of fluid {SI units}
-            dx: float
-                Lattice spacing {SI units}. Must be choosen to resolve necessary flow features
-            dt: float
-                Timestep used for simulation {SI units}. Must be choosen to resolve necessary flow features
-            lattice: Lattice
-                Lattice defined using the subclasses of "Lattice" class defined in lattice.py
+            Arguments:
+                l_charasteristic: float
+                    Charateristic length of the flow {SI units} 
+                u_characteristic: float
+                    Characteristic velocity of the flow {SI units}
+                rho: float
+                    Density of the fluid {SI units}
+                nu: float
+                    Kinematic viscosity of fluid {SI units}
+                dx: float
+                    Lattice spacing {SI units}. Must be choosen to resolve necessary flow features
+                dt: float
+                    Timestep used for simulation {SI units}. Must be choosen to resolve necessary flow features
+                lattice: Lattice
+                    Lattice defined using the subclasses of "Lattice" class defined in lattice.py
+
+            Returns:
+                None
         """
         self.C_l = dx
         self.C_t = dt
@@ -122,11 +127,10 @@ class ConversionParameters(object):
 
     def print_conversion_parameters(self):
         """
-            Helper function to print the conversion parameters C_l, C_t, C_rho
+            Print the conversion parameters C_l, C_t, C_rho
 
-            Arguments
-            *********
-            None
+            Arguments:
+                None
         """
         print("C_l:",self.C_l)
         print("C_t:",self.C_t,"To simulate 1s of real world, {int(1.0/self.C_l)} timesteps are required.")

@@ -28,8 +28,12 @@ class BoundaryCondition(object):
                 Indices of the boundary nodes. Stored as array of tuple
             is_solid: bool
                 Whether the boundary condition is defined for a solid boundary
+            is_dynamic: bool
+                Whether the boundary condition is dynamic i.e., it changes over time. For example, moving wall boundary condition.
             implementation_step: str
-                Define when the boundary condition is applied. Possible values: "pre_collision", "post_collision". Defined in subclass
+                Define when the boundary condition is applied. Possible values: "pre_collision", "post_collision". Set in sub-class
+            needs_extra_implementation: bool
+                Whether the boundary condition needs extra information (for example, the velocity boundary condition). Set in sub-class
     """
     def __init__(self,lattice,boundary_indices,precision,nx,ny,nz=0):
         self.lattice = lattice

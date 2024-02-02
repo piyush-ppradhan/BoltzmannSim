@@ -174,21 +174,32 @@ class LBMBase(object):
     
     @partial(jit, static_argnums=(0,3))
     def step(self,f,rho,u):
+        """
+            Perform one step of LBM simulation. The sequence followed is:
+            1. Collide
+            2. Apply/store values of distribution for specific nodes, if necessary (useful for the halfway bounce-back boundary condition)
+            3. Stream
+            4. Apply boundary conditions for the specific nodes.
+            5. Modify the distribution if corresponding body force model is present.
+            6. Apply body force to the macroscopic flow variables if corresponding body force model is present.
+            7. Return the distribution the macroscopic flow data.
+        """
         f = self.collision(f,rho,u)
         f = self.apply_boundary_conditions(f)
         f = self.stream(f)
         f = self.apply_boundary_conditions(f)
-        f = self.body_force.apply(f,rho,u)
-        if isinstance(self.body_force,NoBodyForce):
-            rho, u = self.compute_macroscopic_variables(f)
-        elif isinstance(self.body_force,ShanChenForce):
-            rho, u = self.compute_macroscopic_variables(f)
-            rho, u = self.body_force.apply(f,rho,u)
-        elif isinstance(self.body_force,GuoBodyForce):
-            f = self.body_force.apply(f,rho,u)
-            rho, u = self.compute_macroscopic_variables(f)
-        else:
-            TypeError("Invalid body force type. Valid body forces type are: NoBodyForce(default), ShanChenForce, GuoBodyForce")
+
+        # First apply body force using models where the distribution is modified
+        f, rho, u = self.body_force.apply(f,rho,u,"distribution")
+
+        # Compute new macroscopic flow variables if the distribution has been modified
+        rho, u = self.compute_macroscopic_variables(f)
+
+        # Modify the macroscopic variables if the force model requires them to be modified instead of the distribution
+        f = self.body_force.apply(f,rho,u,"macroscopic")
+
+        rho, u = self.compute_macroscopic_variables(f)
+
         return f, rho, u
 
     def run(self):

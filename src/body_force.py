@@ -1,6 +1,7 @@
 import jax.numpy as jnp
 from jax import jit
 from functools import partial
+from conversion_parameters import *
 
 class BodyForce(object):
     """
@@ -10,13 +11,22 @@ class BodyForce(object):
             F: array[float]
                 Volumetric body forces defined in SI units. To convert the body force to Lattice Units, CoversionParameters are used internally
             implementation_step: str
-                Defines the data on which the boundary condition is applied. Possible values: "none", "velocity", "distribution". Values are defined in sub-classes.
+                Defines the step where the boundary condition is applied. Possible values: "none", "distribution", "macroscopic". Value is set in sub-class.
+                "none": No changes to the distribution and macroscopic flow variable.
+                "distribution": Changes to the distribution values. (For Guo force model).
+                "macroscopic": Changes the macroscopic values for incorporating the body force. (For Shan-Chen force model)
     """
-    def __init__(self,F):
+    def __init__(self,F,implementation_step):
         self.F = F
+        self.implementation_step = implementation_step
+
+    def convert_to_lattice_units(self,conv_param):
+        """
+            Convert the force in SI units to lattice units 
+        """
+        self.F = F / (self.C_rho * (self.C_l**4) * (self.C_t**0.5))
     
-    @partial(jit, static_argnums=(0,3))
-    def apply(self,f,rho,u,precision):
+    def apply(self,f,rho,u,step,precision):
         """
             Apply the body force to the respective data depending on the force model used. Defined in sub-class.
             
@@ -27,12 +37,14 @@ class BodyForce(object):
                     Density at all grid points.
                 u: array[float]
                     Velocity at all grid points.
+                step: str
+                    The current step of applying body force. It is compared with implementation_step of the force model to accordingly modify the velocity or the distribution
         """
         pass
 
 class NoBodyForce(BodyForce):
     def __init__(self):
-        super().__init__([0.0,0.0,0.0]) # Actual dimension of the force array does not matter, it is simply ignored
+        super().__init__([0.0,0.0,0.0],"none") # Actual dimension of the force array does not matter, it is simply ignored
     
     @partial(jit, static_argnums=(0,3))
     def apply(self,f,rho,u):
@@ -47,12 +59,12 @@ class ShanChenForce(BodyForce):
         u_new = u + F*dt_star / rho
     """
     def __init__(self,F):
-        super().__init__(F)
+        super().__init__(F,"macroscopic")
 
     @partial(jit, static_argnums=(0,2), donate_argnums=(3,))
-    def apply(self,f,rho,u,precision=jnp.float32):
+    def apply(self,f,rho,u,step,precision=jnp.float32):
         """
-            Apply the body force to the velocity as per the Shan-Chen method
+            Apply the body force to the velocity as per the Shan-Chen method.
             
             Arguments:
                 f: array[float] 
@@ -61,15 +73,21 @@ class ShanChenForce(BodyForce):
                     Density values at all grid points.
                 u: array[float]
                     Velocity at all grid points.
+                step: str
+                    The current step of applying body force. It is compared with implementation_step of the force model to accordingly modify the velocity or the distribution.
+                precision: type
+                    Precision used for computation.
         """
-        F = jnp.array(self.F,dtype=precision)
-        u = u + F / rho
+        if self.step == self.implementation_step:
+            F = jnp.array(self.F,dtype=precision)
+            u = u + F / rho
+
         return f, rho, u
 
 #TODO
 class GuoBodyForce(BodyForce):
     """
-        Implementation of body force using Guo et. al's method, as described in“ Lattice Boltzmann Model for Incompressible Flows through Porous Media.” 
+        Implementation of body force using Guo et. al's method, as described in "Lattice Boltzmann Model for Incompressible Flows through Porous Media."
         Physical Review. E, Statistical, Nonlinear, and Soft Matter Physics 66 (October 1, 2002): 036304. https://doi.org/10.1103/PhysRevE.66.036304.
 
         The body force is applied by adding deltaf_i to the distribution functions, where:
@@ -84,13 +102,13 @@ class GuoBodyForce(BodyForce):
             C: float
                 Typical value: (1 - 1/(2*tau_star)) * F
     """
-    def __init__(self,F,**kwargs):
-        super().__init__(F)
+    def __init__(self,F,implementation_step,**kwargs):
+        super().__init__(F,"distribution")
         self.A = kwargs.get("A",0.0)
         self.B = kwargs.get("B",F)
         self.C = kwargs.get("C")
 
-    @partial(jit, static_argnums=(0,3), donate_argnums=(1,))
+    @partial(jit, static_argnums=(0,4), donate_argnums=(1,))
     def apply(self,f,rho,u,precision):
         """
             Apply the body force to the velocity as per the Guo method.

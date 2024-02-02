@@ -18,6 +18,8 @@ class Lattice(object):
                 Weights used for LBM calculation
             e: array[int]
                 Discrete velocity directions present in the stencil
+            main_indices: array[int]
+                Index of main directions in the discrete velocity set.
             oppsite_indices: array[int]
                 Opposite direction for each discrete velocity direction, useful for applying bounce-back boundary conditions
     """
@@ -35,12 +37,14 @@ class Lattice(object):
             case _:
                 ValueError("Invalid precision type. Supported precision: f16, f32, f64")
                 exit()
-        self.e = jnp.array(self.get_velocity_directions(),dtype=self.precision)
-        self.w = jnp.array(self.get_lattice_weights(),dtype=self.precision)
+        self.e = jnp.array(self.construct_velocity_directions(),dtype=self.precision)
+        self.w = jnp.array(self.construct_lattice_weights(),dtype=self.precision)
+        self.main_indices = self.construct_main_velocity_indices()
+        self.opposite_indices = self.construct_opposite_direction_indices()
     
-    def get_velocity_directions(self):
+    def construct_velocity_directions(self):
         """
-            Helper function to compute discrete velocity directions for a given lattice stencil.
+            Compute discrete velocity directions for a given lattice stencil.
             
             Arguments:
                 None
@@ -64,18 +68,73 @@ class Lattice(object):
                 exit()
         return e
 
-    def get_lattice_weights(self):
+    def construct_main_velocity_indices(self):
         """
-            Helper function to compute weights for a given lattice stencil.
+            Compute the index of the main directions in the discrete velocity set. 
+
+            Arguments:
+                None
+            
+            Returns:
+                main_indices: array[int]
+                    Indices of the main directions in the discrete velocity set.
+        """
+        e = np.transpose(self.e)
+        if self.d == 2:
+            main_indices = np.nonzero((np.abs(e[:,0]) + np.abs(e[:,1]) == 1))[0]
+        else:
+            main_indices = np.nonzero((np.abs(e[:,0]) + np.abs(e[:,1]) + np.abs(e[:,2]) == 1))[0]
+        return main_indices
+
+    def construct_opposite_directions_indices(self):
+        """
+            Compute the index of the opposite direction for each direction in the discrete velocity set.
+
+            Arguments:
+                None
+            
+            Returns:
+                array[int]
+                Indices for the opposite direction for velocity directions
+        """
+        e = np.transpose(self.e)
+        opposite_indices = np.array([e.tolist().index((-e[i]).tolist()) for i in range(self.d)])
+        return opposite_indices
+
+    def construct_right_indices(self):
+        """
+        Construct the indices of the velocities that point in the positive x-direction.
+
+        Returns:
+            numpy.ndarray
+                The indices of the right velocities.
+        """
+        c = self.c.T
+        return np.nonzero(c[:, 0] == 1)[0]
+    
+    def construct_left_indices(self):
+        """
+        Construct the indices of the velocities that point in the negative x-direction.
+
+        Returns:
+            numpy.ndarray
+                The indices of the left velocities.
+        """
+        c = self.c.T
+        return np.nonzero(c[:, 0] == -1)[0]
+
+    def construct_lattice_weights(self):
+        """
+            Compute weights for a given lattice stencil.
             
             Arguments:
                 None
 
             Returns:
                 w: array[float]
-                    Lattice weights used for computation
+                    Lattice weights used for computation.
         """
-        e = self.get_velocity_directions()
+        e = self.construct_velocity_directions()
         match(self.stencil):
             case "D2Q9":
                 w = np.zeros(self.q)
@@ -96,6 +155,30 @@ class Lattice(object):
                 ValueError("Invalid lattice stencil. Supported lattice stencil: D2Q9, D3Q19, D3Q27")
                 exit()
         return w
+    
+    def construct_lattice_moments(self):
+        """
+        Constructs the moments of the lattice i.e., the products of the velocity vectors.
+        Used in the computation of the equilibrium distribution and the collision operator in the Lattice Boltzmann Method (LBM).
+
+        Returns:
+            ee: numpy.ndarray
+                The moments of the lattice.
+        """
+        e = self.e.T
+        # Counter for the loop
+        counter = 0
+
+        # nt: number of independent elements of a symmetric tensor
+        nt = self.d * (self.d + 1) // 2
+
+        ee = np.zeros((self.q, nt))
+        for a in range(0, self.d):
+            for b in range(a, self.d):
+                ee[:, counter] = e[:, a] * e[:, b]
+                counter += 1
+
+        return ee 
 
 class D2Q9(Lattice):
     """
@@ -107,8 +190,8 @@ class D2Q9(Lattice):
             q: int = 9
             stencil: str = "D2Q9"
             precision:str = "f16", "f32", "f64" Default: "f32"
-            w: array[float]
-            e: array[int]
+            w: Array-like
+            e: Array-like
     """
     def __init__(self,precision="f32"):
         super().__init__("D2Q9",precision)
@@ -116,7 +199,7 @@ class D2Q9(Lattice):
 
     def compute_constants(self):
         """
-            Helper function to compute the speed of sound (c_s) and its square (c_s2).
+            Compute the speed of sound (c_s) and its square (c_s2).
 
             Arguments:
                 None
@@ -146,7 +229,7 @@ class D3Q19(Lattice):
 
     def compute_constants(self):
         """
-            Helper function to compute the speed of sound (c_s) and its square (c_s2).
+            Compute the speed of sound (c_s) and its square (c_s2).
 
             Arguments:
                 None
@@ -173,7 +256,7 @@ class D3Q27(Lattice):
 
     def compute_constants(self):
         """
-            Helper functions to compute the speed of sound (c_s) and its square (c_s2).
+            Compute the speed of sound (c_s) and its square (c_s2).
 
             Arguments:
                 None 
