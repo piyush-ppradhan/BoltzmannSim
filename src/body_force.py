@@ -50,7 +50,7 @@ class NoBodyForce(BodyForce):
     def apply(self,f,rho,u):
         return f, rho, u
 
-class ShanChenForce(BodyForce):
+class ShanChenBodyForce(BodyForce):
     """
         Implementation of body force using Shan-Chen method, as described in “Lattice Boltzmann Model for Simulating Flows with Multiple Phases and Components.” 
         Physical Review E 47, no. 3 (March 1, 1993): 1815–19. https://doi.org/10.1103/PhysRevE.47.1815.

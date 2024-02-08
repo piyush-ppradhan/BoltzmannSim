@@ -1,5 +1,6 @@
+import numpy as np
 import jax.numpy as jnp
-from jax import jit
+from jax import jit, device_count
 from functools import partial
 
 class BoundaryCondition(object):
@@ -25,9 +26,9 @@ class BoundaryCondition(object):
             precision: str
                 Precision to be used for computation. Possible values: "f16", "f32", "f64". Default: "f32"
             boundary_indices: array[tuple]
-                Indices of the boundary nodes. Stored as array of tuple
-            is_solid: bool
-                Whether the boundary condition is defined for a solid boundary
+                Indices of the boundary nodes. Stored as array of tuple.
+            is_solid: bool 
+                Whether the boundary condition is defined for a solid boundary.
             is_dynamic: bool
                 Whether the boundary condition is dynamic i.e., it changes over time. For example, moving wall boundary condition.
             implementation_step: str
@@ -48,12 +49,11 @@ class BoundaryCondition(object):
                 self.precision = jnp.float32
             case "f64":
                 self.precision = jnp.float64
-            case _:
-                ValueError("Invalid precision type. Valid precision type are: \"f16\", \"f32\", \"f64\"")
     
     def create_local_mask_and_normal_arrays(self, grid_mask):
         """
-            Creates local mask and normal arrays for the boundary condition.
+            Creates local mask and normal arrays for the boundary condition, based on the grid mask.
+            If extra configuration is necessary, the `configure` method is called.
 
             Arguments: 
                 grid_mask : Array-like
@@ -61,9 +61,6 @@ class BoundaryCondition(object):
 
             Returns:
                 None
-
-            This method creates local mask and normal arrays for the boundary condition based on the grid mask.
-            If the boundary condition requires extra configuration, the `configure` method is called.
         """
         if self.needs_extra_configuration:
             boundary_mask = self.get_boundary_mask(grid_mask)
@@ -75,7 +72,7 @@ class BoundaryCondition(object):
         self.imissing, self.iknown = self.get_missing_indices(boundary_mask)
         self.imissing_mask, self.iknown_mask, self.imiddle_mask = self.get_missing_mask(boundary_mask)
 
-        return 
+        return
 
     def get_boundary_mask(self, grid_mask):  
         """
@@ -90,14 +87,14 @@ class BoundaryCondition(object):
             Returns:
                 boundaryMask : array-like
         """   
-        shifted_indices = np.array(self.indices)
-        shifted_indices[0] += device_count()
+        shifted_indices = np.array(self.boundary_indices)
+        shifted_indices[0] += device_count() # For single device implementation, there is no change to the grid_mask 
         shifted_indices[1:] += 1
-        # Convert back to tuple
-        shifted_indices = tuple(shifted_indices)
-        boundaryMask = np.array(grid_mask[shifted_indices])
 
-        return boundaryMask
+        shifted_indices = tuple(shifted_indices)
+        boundary_mask = np.array(grid_mask[shifted_indices])
+
+        return boundary_mask
 
     def configure(self, boundary_mask):
         """
@@ -219,7 +216,7 @@ class BoundaryCondition(object):
 
 
     @partial(jit, static_argnums=(0,))
-    def apply(self,fout,fin):
+    def apply(self,fout,fin,timestep,implementation_step):
         """
             Apply boundary condition to the distribution f. Defined in subclass.
 
@@ -228,16 +225,39 @@ class BoundaryCondition(object):
                     Output distribution array
                 fin: array[float]
                     Input distribution array
+                timestep: int
+                    Timestep used for calculating values for dynamic boundary condition.
+                implementation_step: str
+                    Implementation step where the boundary condition will be applied. Possible values: "post_collision", "post_streaming".
         """
         pass
 
 class DoNothing(BoundaryCondition):
+    """
+        DoNothing makes no changes to the values of distribution at the boundary_indices and returns them as is. 
+
+        Attributes:
+            None
+    """
     def __init__(self,lattice,indices,precision,nx,ny,nz=0):
         super().__init__(lattice,indices,precision,nx,ny,nz)
 
     @partial(jit, static_argnums=(0,))
-    def apply(self,fout,fin):
-        return fin
+    def apply(self,fout,fin,timestep,implementation_step):
+        """
+            Applies no boundary condition to the provided boundary nodes. 
+
+            Arguments:
+                fout: Array-like
+                    Output distribution.
+                fin: Array-like
+                    Input distribution.
+                timestep: int
+                    Timestep used for calculating dynamics BCs. Not used in this function.
+                implementation_step: str
+                    Implementation to apply the boundary condition.
+        """
+        return fin[self.boundary_indices]
 
 class HalfwayBounceBack(BoundaryCondition):
     """
@@ -255,7 +275,7 @@ class HalfwayBounceBack(BoundaryCondition):
 
     @partial(jit, static_argnums=(0,))
     def apply(self,fout,fin):
-        return fin.at[self.boundary_indices].set(fin[self.boundary_indices,self.lattice.opposite_indices])
+        return fin[self.boundary_indices][..., self.lattice.opposite_indices]
 
 class ZouHe(BoundaryCondition):
     """

@@ -40,7 +40,7 @@ class Lattice(object):
         self.e = jnp.array(self.construct_velocity_directions(),dtype=self.precision)
         self.w = jnp.array(self.construct_lattice_weights(),dtype=self.precision)
         self.main_indices = self.construct_main_velocity_indices()
-        self.opposite_indices = self.construct_opposite_direction_indices()
+        self.opposite_indices = self.construct_opposite_directions_indices()
     
     def construct_velocity_directions(self):
         """
@@ -109,8 +109,8 @@ class Lattice(object):
             numpy.ndarray
                 The indices of the right velocities.
         """
-        c = self.c.T
-        return np.nonzero(c[:, 0] == 1)[0]
+        e = self.e.T
+        return np.nonzero(e[:, 0] == 1)[0]
     
     def construct_left_indices(self):
         """
@@ -120,8 +120,8 @@ class Lattice(object):
             numpy.ndarray
                 The indices of the left velocities.
         """
-        c = self.c.T
-        return np.nonzero(c[:, 0] == -1)[0]
+        e = self.e.T
+        return np.nonzero(e[:, 0] == -1)[0]
 
     def construct_lattice_weights(self):
         """

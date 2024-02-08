@@ -33,5 +33,3 @@ class MRT(LBMBase):
     """
     def __init__(self,tau):
         self.tau = tau
-       
-
