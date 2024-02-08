@@ -100,7 +100,6 @@ class LBMBase(object):
         self.nDevices = jax.device_count()
         self.backend = jax.default_backend()
 
-
         self.d = self.lattice.d
         self.q = self.lattice.q
         self.e = self.lattice.e
@@ -339,6 +338,16 @@ class LBMBase(object):
             raise ValueError("restore_checkpoint must be a boolean")
         self._restore_checkpoint = value
 
+    @property
+    def nDevices(self):
+        return self._nDevices
+
+    @nDevices.setter
+    def nDevices(self, value):
+        if not isinstance(value, int):
+            raise TypeError("nDevices must be an integer")
+        self._nDevices = value
+
     def show_simulation_parameters(self):
         attributes_to_show = [
             'omega', 'nx', 'ny', 'nz', 'd', 'lattice', 'precision', 'write_precision', 
@@ -382,19 +391,29 @@ class LBMBase(object):
             descriptive_name = descriptive_names.get(attr, attr)  # Use the attribute name as a fallback
             row = f"{colored(descriptive_name, 'blue'):>30} | {colored(value, 'yellow')}"
             print(row)
+
+    def _create_boundary_condition_data(self):
+        """
+            Creates the data necessary for applying boundary conditions:
+                1. Computing grid_mask
+                2. Computing local mask and normal arrays
+            
+            Arguments:
+                None
+        """
             
     def compute_macroscopic_variables(self,f):
         """
             Compute the macroscopic variables density (rho) and velocity (u) using the distributions.
 
             Arguments:
-                f: array[float]
+                f: Array-like
                     Distribution array, storing distribution for all lattice nodes for all directions. 
 
             Returns:
-                rho: array[float]
+                rho: Array-like
                     Density at each lattice nodes. 
-                u: array[int]
+                u: Array-like
                     Velocity at each lattice nodes.
         """
         rho = jnp.sum(f, axis=-1)
