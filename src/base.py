@@ -1,21 +1,24 @@
 """
-    Definition of LBMBase class for defining and running a problem
+Definition of LBMBase class for defining and running a problem
 """
 
 # Standard libraries
 import time
 
 # Third-party imports
-from functools import partial
+from functools import partial # Function modifier for identifying the static and traced variables
 import numpy as np
-from termcolor import colored
+from termcolor import colored # Colored output to the terminal
 import jax
-
+import jmp # Set precision policy for the input and output
+import orbax as orb # For storing and restoring checkpoints
+import jmp # Mixed precision library for JAX
+ 
 # JAX-specific imports
 import jax.numpy as jnp
 from jax import jit, lax, vmap, config
 from jax.experimental import mesh_utils
-from jax.sharding import PositionalSharding, NamedSharding
+from jax.sharding import PositionalSharding, NamedSharding, PartitionSpec, Mesh
 from jax.experimental.shard_map import shard_map
 from jax.experimental.multihost_utils import process_allgather
 
@@ -25,52 +28,55 @@ from utilities import write_vtk
 
 class LBMBase(object):
     """
-        Base class to define all LBM solvers and problems
+    Base class to define all LBM solvers and problems
 
-        Attributes:
-            omega: float
-                Inverse of relaxation time parameter tau.
-            nx: int
-                Number of grid points in the x-direction
-            ny: int
-                Number of grid points in the y-direction
-            nz: int
-                Number of grid points in the z-direction. For 2D problem, nz = 0
-            lattice: Lattice
-                Lattice stencil used for simulation as defined in lattice.py
-            body_force: BodyForce
-                Define any volumetric forces to be applied during simulation as defined in body_force.py. Default: NoBodyForce()
-            precision: str
-                Precision for computation and exporting the data. Same as lattice.precision Default: "f32"
-            solid_mask: array[int]
-                Array to identify all the solid nodes in the grid. Solid node: 0, Fluid node: 1
-            rho0: array[float]
-                Initial value of density at each lattice node. Dimension: (nx,ny) or (nx,ny,nz). Default: 1.0 for all grid points
-            u0: array[float]
-                Initial value of density at each lattice node. Dimension: (nx,ny,2) or (nx,ny,nz,2). Default: 0.0 for all grid points
-            boundary_conditions: BoundaryCondition
-                Boundary conditions used in the problem, defined as a list of objects of class BoundaryCondition.
-            conv_param: ConversionParameter
-                Conversion parameters to convert between Lattice Units and SI units.
-            filename_prefix: str
-                Prefix used in the exported VTK file. Add relative folder location to save in a different file.
-                The final filename will be: filename_prefix-timestep.vtk Default: ./output-timestep.vtk
-            write_start: int
-                Timestep at which the export of data is started
-            write_control: int
-                Timestep interval after which data is exported, starting from write_start
-            create_log: bool
-                Log file is saved in current directory, it will overwrite the preci
-            output_dir: str
-                Directory where output files will be exported. Auto-created if it doesn't exist
-            compute_mlups: bool
-                Compute the Million Lattice Updates per Second (MLUPS) to evaluate the performance of the code. Default: False
-            checkpoint_rate: int {optional}
-                Rate at which checkpoint files will be written. Default: 0
-            checkpoint_dir : str {optional}
-                Ignored if restart_flag is set to False. Default: ./checkpoints
-            restore_checkpoint: bool
-                The simulation from the latest checkpoint if set to trur. Default: False
+    Attributes:
+        omega: float
+            Inverse of relaxation time parameter tau.
+        nx: int
+            Number of grid points in the x-direction
+        ny: int
+            Number of grid points in the y-direction
+        nz: int
+            Number of grid points in the z-direction. For 2D problem, nz = 0
+        lattice: Lattice
+            Lattice stencil used for simulation as defined in lattice.py
+        body_force: BodyForce
+            Define any volumetric forces to be applied during simulation as defined in body_force.py. Default: NoBodyForce()
+        compute_precision: str
+            Precision for computation and exporting the data. Same as lattice.precision Default: "f32"
+        write_precision: str
+            Precision for file output. Default: "f32"
+        solid_mask: numpy.ndarray
+            Mask that identifies all the solid nodes in the grid. Solid node: 0, Fluid node: 1
+        boundary_conditions: BoundaryCondition
+            Boundary conditions used in the problem, defined as a list of objects of class BoundaryCondition.
+        conv_param: ConversionParameter
+            Conversion parameters to convert between Lattice Units and SI units.
+        create_log: bool
+            Log file is saved in current directory, it will overwrite the preci
+        output_dir: str
+            Directory where output files will be exported. Auto-created if it doesn't exist
+        compute_mlups: bool {Optional}
+            Compute the Million Lattice Updates per Second (MLUPS). Default: False
+        checkpoint_rate: int {Optional}
+            Rate at which checkpoint files will be written. Default: 0
+        checkpoint_dir : str {Optional}
+            Ignored if restart_flag is set to False. Default: ./checkpoints
+        restore_checkpoint: bool {Optional}
+            The simulation from the latest checkpoint if set to trur. Default: False
+        write_start: int
+            Timestep at which the export of data is started.
+        write_control: int
+            Timestep interval after which data is exported, starting from write_start.
+        output_dir: str
+            Default: ./output
+        print_info_rate: int
+            Default: 1 (i.e., every timesteps)
+        downsampling_factor: int {Optional}
+            Default: 1
+        return_post_col_dist: bool {Optional}
+            Return the post collision distribution values. Default: False
     """
     def __init__(self, **kwargs):
         self.omega = kwargs.get("omega")
@@ -79,25 +85,24 @@ class LBMBase(object):
         self.nz = kwargs.get("nz",0)
         self.lattice = kwargs.get("lattice")
         self.body_force = kwargs.get("body_force", NoBodyForce())
-        self.precision = self.lattice.precision # Used for computation as well as storage of data
-        self.write_precision = kwargs.get("write_precision")
+        self.compute_precision = self.set_precision(self.lattice.precision)
+        self.write_precision = self.set_precision(kwargs.get("write_precision"))
         self.solid_mask = kwargs.get("solid_mask")
         self.total_timesteps = kwargs.get("total_timesteps")
-        self.rho0 = kwargs.get("rho0")
-        self.u0 = kwargs.get("u0")
         self.boundary_conditions = kwargs.get("boundary_conditions") # The boundary conditions are passed during the problem definition
         self.conv_param = kwargs.get("conversion_parameters")
-        self.filename_prefix = kwargs.get("filename_prefix", "./output")
-        self.write_start = kwargs.get("write_start")
-        self.write_control = kwargs.get("write_control")
-        self.create_log = kwargs.get("create_log", True)
-        self.output_dir = kwargs.get("output_dir")
         self.compute_mlups = kwargs.get("compute_MLUPS", False)
         self.checkpoint_rate = kwargs.get("checkpoint_rate", 0)
-        self.checkpoint_dir = kwargs.get("checkpoint_dir", 0)
+        self.checkpoint_dir = kwargs.get("checkpoint_dir", "./checkpoints")
         self.restore_checkpoint = kwargs.get("restore_checkpoint", False)
+        self.write_start = kwargs.get("write_start")
+        self.write_control = kwargs.get("write_control")
+        self.output_dir = kwargs.get("output_dir") 
+        self.print_info_rate = kwargs.get("print_info_rate", 1)
+        self.downsampling_factor = kwargs.get("downsampling_factor", 1)
+        self.return_post_col_dist = kwargs.get("return_post_col_dist", False)
 
-        self.nDevices = jax.device_count()
+        self.n_devices = jax.device_count()
         self.backend = jax.default_backend()
 
         self.d = self.lattice.d
@@ -106,19 +111,67 @@ class LBMBase(object):
         self.w = self.lattice.w
 
         #Configure JAX to use 64-bit precision if necessary
-        if self.precision == jnp.float64:
+        if self.compute_precision == jnp.float64:
             config.update("jax_enable_x64", True)
-            print("Using 64-bit precision for computation and file output")
+            print(colored("Using 64-bit precision for computation.\n", 'yellow'))
+            
+        self.precision_policy = jmp.Policy(compute_dtype=self._compute_precision,
+                                            param_dtype=self.compute_precision,
+                                            output_dtype=self.write_precision)
+            
+        #Set the checkpoint manager
+        if self.checkpoint_rate > 0:
+            mngr_options = orb.CheckpointManagerOptions(save_interval_steps=self.checkpoint_rate, max_to_keep=1)
+            self.mngr = orb.CheckpointManager(self.checkpoint_dir, orb.PyTreeCheckpointer(), options=mngr_options)
+        else:
+            self.mngr = None
 
         # Check if nx, ny, nz has been defined appropriately
         if None in {self.nx, self.ny, self.nz}:
             print("Error: at least nx and ny must be provided to perform the simulation")
             exit()
-
-        # Scale nx to be divisible by the number of devices. If nx is not divisible, than scale nx to make it divisible
+        # Scale nx to be divisible by the number of devices.
         nx = self.nx
-        if self.nx % self.nDevices:
-            self.nx = nx + (self.nDevices - nx % self.nDevices)
+        if self.nx % self.n_devices:
+            self.nx = nx + (self.n_devices - nx % self.n_devices)
+
+        self.show_simulation_parameters()
+        
+        self.grid_info = {
+            'nx': self.nx,
+            'ny': self.ny,
+            'nz': self.nz,
+            'dim': self.d,
+            'lattice': self.lattice
+        }
+
+        P = PartitionSpec
+        # Define the left and right permutation to communicate between different GPUs.
+        # The tuple for permutation is defined as (source_index, destination_index)
+        self.right_perm = [(i, (i+1) % self.n_devices) for i in range(self.n_devices)]
+        self.left_perm = [((i+1) % self.n_devices, i) for i in range(self.n_devices)]
+
+        # Setting up sharding
+        if self.d == 2:
+            self.devices = mesh_utils.create_device_mesh((self.n_devices,1,1))
+            self.mesh = Mesh(self.devices, axis_names=("x", "y", "name"))
+            self.sharding = NamedSharding(self.mesh, P("x", "y", "name"))
+
+            self.streaming = jit(shard_map(self.streaming_m, mesh = self.mesh, 
+                                            in_specs = P("x", None, None), out_spec = P("x", None, None),
+                                            check_rep = False))
+        elif self.d == 3:
+            self.devices = mesh_utils.create_device_mesh((self.n_devices,1,1))
+            self.sharding = NamedSharding(self.mesh, P("x", "y", "z", "name"))
+
+            self.streaming = jit(shard_map(self.streaming_m, mesh = self.mesh, 
+                                            in_specs = P("x", None, None, None), out_spec = P("x", None, None, None),
+                                            check_rep = False))
+        else:
+            raise ValueError("Dimension of the problem must be either 2 or 3")
+
+        self.bounding_box_indices =  self.bounding_box_indices()
+        self._create_boundary_condition_data()
 
     @property
     def omega(self):
@@ -195,16 +248,16 @@ class LBMBase(object):
         self._body_force = value
 
     @property
-    def precision(self):
-        return self._precision
+    def compute_precision(self):
+        return self._compute_precision
 
     @precision.setter
-    def precision(self, value):
+    def compute_precision(self, value):
         if value is None:
-            raise ValueError("Precison value must be provided")
-        if value not in ['f16', 'f32', 'f64']:
-            raise ValueError("Valid presion values are: 'f16', 'f32' or 'f64'")
-        self._precision = value
+            raise ValueError("Precison value must be provided.")
+        if value not in ["f16", "f32", "f64"]:
+            raise ValueError("Valid presion values are: \"f16\", \"f32\" or \"f64\"")
+        self._compute_precision = value
 
     @property
     def write_precision(self):
@@ -213,9 +266,9 @@ class LBMBase(object):
     @write_precision.setter
     def write_precision(self, value):
         if value is None:
-            raise ValueError("Write precison value must be provided")
-        if value not in ['f16', 'f32', 'f64']:
-            raise ValueError("Valid presion values are: 'f16', 'f32' or 'f64'")
+            raise ValueError("Write precison value must be provided.")
+        if value not in ["f16", "f32", "f64"]:
+            raise ValueError("Valid presion values are: \"f16\", \"f32\" or \"f64\"")
         self._write_precision = value
 
     @property
@@ -229,79 +282,7 @@ class LBMBase(object):
         if not isinstance(value,int):
             raise ValueError("Total timesteps must be an integer")
         self._total_timesteps = value
-
-    @property
-    def filename_prefix(self):
-        return self._filename_prefix
-
-    @filename_prefix.setter
-    def filename_prefix(self, value):
-        if value is None:
-            raise ValueError("filename_prefix must be provided")
-        if not isinstance(value,str):
-            raise ValueError("filename_prefix must be an integer")
-        self._filename_prefix = value
-
-    @property
-    def write_start(self):
-        return self._write_start
-
-    @write_start.setter
-    def write_start(self, value):
-        if value is None:
-            raise ValueError("write_start must be provided")
-        if not isinstance(value,int):
-            raise ValueError("write_start must be an integer")
-        self._write_start = value
-
-    @property
-    def write_control(self):
-        return self._write_control
-
-    @write_control.setter
-    def write_control(self, value):
-        if value is None:
-            raise ValueError("write_control must be provided")
-        if not isinstance(value,int):
-            raise ValueError("write_control must be an integer")
-        self._write_control = value
-
-    @property
-    def create_log(self):
-        return self._create_log
-
-    @create_log.setter
-    def create_log(self, value):
-        if value is None:
-            raise ValueError("create_log must be provided")
-        if not isinstance(value,bool):
-            raise ValueError("create_log must be a boolean")
-        self._create_log = value
-
-    @property
-    def output_dir(self):
-        return self._output_dir
-
-    @output_dir.setter
-    def output_dir(self, value):
-        if value is None:
-            raise ValueError("output_dir must be provided")
-        if not isinstance(value,str):
-            raise ValueError("output_dir must be a string")
-        self._output_dir = value
-
-    @property
-    def compute_mlups(self):
-        return self._compute_mlups
-
-    @compute_mlups.setter
-    def compute_mlups(self, value):
-        if value is None:
-            raise ValueError("compute_mlups must be provided")
-        if not isinstance(value,bool):
-            raise ValueError("compute_mlups must be a boolean")
-        self._compute_mlups = value
-
+        
     @property
     def checkpoint_rate(self):
         return self._checkpoint_rate
@@ -336,24 +317,91 @@ class LBMBase(object):
             raise ValueError("restore_checkpoint must be provided")
         if not isinstance(value,bool):
             raise ValueError("restore_checkpoint must be a boolean")
-        self._restore_checkpoint = value
+        self._restore_checkpoint = valu
 
     @property
-    def nDevices(self):
-        return self._nDevices
+    def write_start(self):
+        return self._write_start
 
-    @nDevices.setter
-    def nDevices(self, value):
+    @write_start.setter
+    def write_start(self, value):
+        if value is None:
+            raise ValueError("write_start must be provided.")
+        if not isinstance(value,int):
+            raise ValueError("write_start must be an integer.")
+        self._write_start = value
+
+    @property
+    def write_control(self):
+        return self._write_control
+
+    @write_control.setter
+    def write_control(self, value):
+        if value is None:
+            raise ValueError("write_control must be provided.")
+        if not isinstance(value,int):
+            raise ValueError("write_control must be an integer.")
+        self._write_control = value
+
+    @property
+    def output_dir(self):
+        return self._output_dir
+
+    @output_dir.setter
+    def output_dir(self, value):
+        if value is None:
+            raise ValueError("output_dir must be provided")
+        if not isinstance(value,str):
+            raise ValueError("output_dir must be a string")
+        self._output_dir = value
+
+    @property
+    def compute_mlups(self):
+        return self._compute_mlups
+
+    @compute_mlups.setter
+    def compute_mlups(self, value):
+        if value is None:
+            raise ValueError("compute_mlups must be provided")
+        if not isinstance(value,bool):
+            raise ValueError("compute_mlups must be a boolean")
+        self._compute_mlups = value
+        
+    @property
+    def print_info_rate(self):
+        return self._print_info_rate
+    
+    @print_info_rate.setter
+    def print_info_rate(self, value):
+        if value is None:
+            print("print_info_rate value must be provided")
         if not isinstance(value, int):
-            raise TypeError("nDevices must be an integer")
-        self._nDevices = value
+            raise("print_info_rate must be an integer.")
+        self._print_info_rate = value
+
+    @property
+    def n_devices(self):
+        return self._n_devices
+
+    @n_devices.setter
+    def n_devices(self, value):
+        if not isinstance(value, int):
+            raise TypeError("n_devices must be an integer")
+        self._n_devices = value
+        
+    def set_precision(self):
+        return {
+            "f16": jnp.float16,
+            "f32": jnp.float32,
+            "f64": jnp.float64
+        }.get(jnp.float32)
 
     def show_simulation_parameters(self):
         attributes_to_show = [
-            'omega', 'nx', 'ny', 'nz', 'd', 'lattice', 'precision', 'write_precision', 
-            'total_timesteps', 'conv_param', 'write_start', 'write_control', 
-            'create_log', 'output_dir', 'compute_mlups', 'checkpoint_rate',
-            'checkpoint_dir', 'restore_checkpoint', 'nDevices', 'backend'
+            'omega', 'nx', 'ny', 'nz', 'd', 'lattice', 'compute_precision', 'write_precision', 
+            'total_timesteps', 'conv_param', 'checkpoint_rate', 'checkpoint_dir', 
+            'restore_checkpoint', 'write_start', 'write_control', 'output_dir', 
+            'compute_mlups', 'downsampling_factor', 'n_devices', 'backend'
         ]
 
         descriptive_names = {
@@ -363,25 +411,23 @@ class LBMBase(object):
             'nz': 'Grid Points in Z',
             'd': 'Dimensionality',
             'lattice': 'Lattice Type',
-            'precision': 'Precision used for computation',
+            'compute_precision': 'Precision used for computation',
             'write_precision': 'Precision used for writing the output files',
             'total_timesteps': 'Total timesteps run in the simulation',
             'conv_param': 'Conversion parameters used to convert between the lattice and SI units',
-            'write_start': 'Timestep from which output export begins',
-            'write_control': 'The rate of output export in terms of timesteps',
-            'create_log': 'Create a log file for the simulation',
-            'output_dir': 'Directory used for output export',
-            'compute_mlups': 'Determines if the MLUPS will be computed',
             'checkpoint_rate': 'Rate at which files are generated',
             'checkpoint_dir': 'Directory where checkpoint files are written',
             'restore_checkpoint': 'Start simulation from a checkpoint instead of beginning',
-            'nDevices': 'Number of Devices',
+            'write_start': 'Timestep from which output export begins',
+            'write_control': 'The rate of output export in terms of timesteps',
+            'compute_mlups': 'Determines if the MLUPS will be computed',
+            'downsampling_factor': 'Downsampling factor used for the output.',
+            'n_devices': 'Number of Devices',
             'backend': 'Backend'
         }
         simulation_name = self.__class__.__name__
         
         print(colored(f'**** Simulation Parameters for {simulation_name} ****', 'green'))
-                
         header = f"{colored('Parameter', 'blue'):>30} | {colored('Value', 'yellow')}"
         print(header)
         print('-' * 50)
@@ -394,46 +440,251 @@ class LBMBase(object):
 
     def _create_boundary_condition_data(self):
         """
-            Creates the data necessary for applying boundary conditions:
-                1. Computing grid_mask
-                2. Computing local mask and normal arrays
-            
-            Arguments:
-                None
+        Creates the data necessary for applying boundary conditions:
+            1. Computing grid_mask
+            2. Computing local mask and normal arrays
+        
+        Arguments:
+            None
         """
+        solid_halo_list = [np.array(bc.boundary_indices) for bc in self.boundary_conditions if bc.is_solid]
+        solid_halo_voxels = np.unique(np.vstack(solid_halo_list)) if solid_halo_list else None
+        grid_mask = self.create_grid_mask(solid_halo_voxels)
+
+    def distributed_array_init(self, shape, ttype, init_val = 0, sharding=None):
+        """
+        Generate a jax distributed with given shape, type, initial value and sharding strategy.
+
+        Arguments:
+            shape: tuple
+                Shape of the desired distributed array.
+            ttype: type
+                Data type of the array elements.
+            init_val: float
+                Initial value to be used while  declaring the array.
+            sharding: None
+                Sharding strategy to be used for distributing the array between devices
+
+        Returns:
+            x: jax.ndarray
+                Distributed array with given shape, data type, initial value and sharding strategy
+        """
+        if sharding is None:
+            sharding = self.sharding
+        x = jnp.full(shape=shape, fill_value=init_val, dtype=ttype)
+        return jax.lax.with_sharding_constraint(x, sharding)
+    
+    def initialize_macroscopic_fields(self):
+        """
+        Functions to initialize the density and velocity arrays with their corresponding initial values.
+        By default, velocities are 0 everywhere and density is 1.0 everywhere.
+        
+        Note: Function must be overwritten in a subclass or instance of the class.
+        
+        Arguments:
+            None by default, can be overwritten as required
+        
+        Returns:
+            None, None: The default density and velocity values, both None. 
+            This indicates that the actual values should be set elsewhere.
+        """
+        print("Default initial conditions assumed: density = 1.0 and velocity = 0.0")
+        print("To set explicit initial values for velocity and density, use the self.initialize_macroscopic_fields function")
+        return None, None
+    
+    def assign_fields_sharded(self):
+        """
+        This function is used to initialize the distribution array using the initial velocities and velocity defined in self.initialize_macroscopic_fields function. 
+        To do this, function first uses the initialize_macroscopic_fields function to get the initial values of rho (rho0) and velocity (u0).
+    
+        The distribution is initialized with rho0 and u0 values, using the self.equilibrium function.
+        
+        Arguments:
+            None
+
+        Returns:
+            f: A distributed JAX array of shape: (self.nx, self.ny, self.q) for 2D and (self.nx, self.ny, self.nz, self.q) for 3D.
+        """
+        rho0, u0 = self.initialize_macroscopic_fields()
+        shape = (self.nx, self.ny, self.q) if self.d == 2 else (self.nx, self.ny, self.nz, self.q)
+        if rho0 is None or u0 is None:
+            f = self.distributed_array_init(shape, self.precision_policy.output_dtype, init_val=self.w)
+        else:
+            f = self.initialize_distribution(rho0, u0)
+        return f
+    
+    def initialize_distribution(self, rho0, u0):
+        """
+        This function is used to initialize the distribution array for the simulation.
+        It uses the equilibrium distribution function with initial density and velocities
+        being defined in self.initialize_macroscopic_fields.
+
+        Arguments:
+            None
+
+        Returns:
+            f: JAX array
+                JAX array holding the distribution array used in the simulation
+        """
+        return self.equilibrium(rho0, u0)
+
+    @partial(jit, static_argnums=(0,))
+    def create_grid_mask(self, solid_halo_voxels):
+        """
+        Create the binary mask for the known and unknown directions in the lattice.
+
+        Arguments:
+            solid_mask: jax.array
+                Indices of the solid lattice points in the grid.
+
+        Returns:
+            None
+        """
+        hw_x = self.n_devices
+        hw_y = hw_z = 1 
+        
+    def bounding_box_indices(self):
+        """
+        This function returns the indices the lattice nodes at the boundaries of the domain.
+        These points form the boundary edges in 2D and boundary faces in 3D.
+        Can be used to setup the boundary condition for the problem.
+        
+        Arguments:
+            None
+        
+        Returns:
+            boundary_box: dict
+                Dictionary the key and corresponding indices for each boundary. 
+                The keys are "top", "bottom", "left", "right" for 2D and additional "front", "back" for 3D.
+                The indices are defined in numpy array
+        """
+        if self.d == 2:
+            # In 2D, the bounding edges are "left", "right", "top" and "bottom"
+            # Each edges is represented by array of slices. For example, the "left" edge comprises
+            # of all points where x = 0
+            return {
+                "left": np.array([(0,y) for y in range(self.ny)]),
+                "right": np.array([(nx-1,y) for y in range(self.ny)]),
+                "top": np.array([(x,ny-1) for x in range(self.nx)]),
+                "bottom": np.array([(x,0) for y in range(self.nx)])
+            }
+        elif self.d == 3:
+            # Similar to 2D, but here array slices represent the boundary faces. For example,
+            # the "left" slices comprises all coordinates (x,y,z) where x = 0
+            return {
+                "left": np.array([(0,y,z) for y in range(self.ny) for z in range(self.nz)]),
+                "right": np.array([(self.nx-1,y,z) for y in range(self.ny) for z in range(self.nz)]),
+                "top": np.array([(x,self.ny-1,z) for x in range(self.nx) for z in self.range(self.nz)]),
+                "bottom": np.array([(x,0,z) for x in range(self.nx) for z in self.range(self.nz)]),
+                "front": np.array([(x,y,self.nz-1) for x in range(self.nx) for y in self.range(self.ny)]),
+                "back": np.array([(x,y,0) for x in range(self.nx) for y in self.range(self.ny)])
+            }
+    
+    def send_right(self, x, axis_name):
+        """
+        This function sends the data to the right neighboring process in a parallel computing environment.
+        It uses a permutation operation provided by the LAX library.
+
+        Parameters
+        ----------
+        x: jax.numpy.ndarray
+            The data to be sent.
+        axis_name: str
+            The name of the axis along which the data is sent.
+
+        Returns
+        -------
+        jax.numpy.ndarray
+            The data after being sent to the right neighboring process.
+        """
+        return lax.ppermute(x, perm=self.rightPerm, axis_name=axis_name)
+   
+    def send_left(self, x, axis_name):
+        """
+        This function sends the data to the left neighboring process in a parallel computing environment.
+        It uses a permutation operation provided by the LAX library.
+
+        Parameters
+        ----------
+        x: jax.numpy.ndarray
+            The data to be sent.
+        axis_name: str
+            The name of the axis along which the data is sent.
+
+        Returns
+        -------
+            The data after being sent to the left neighboring process.
+        """
+        return lax.ppermute(x, perm=self.leftPerm, axis_name=axis_name)
+    
+    @partial(jit, static_argnums=(0,), donate_argnums=(1,))
+    def streaming_p(self,fin):
+        """
+        Perform streaming operation on a partitioned (in the x-direction) distribution function
+        
+        Arguments:
+            f: jax.ndarray
+                Distribution function which is defined over multiple devices.
+
+        Returns:
+            f: jax.ndarray
+                Distribution function after streaming has been applied
+        """
+        def streaming_i(f, e):
+            return jnp.roll(f,(e[0], e[1], e[2]),axis=(0, 1, 2))
+        return vmap(streaming_i, in_axes=(-1,0), out_axes=0)(fin, self.e.T)
+    
+    def streaming_m(self, f):
+        """
+        This function will communicate the respective streamed distribution from other neighbouring array shards.
+        To the current shard.
+        
+        (left_halo, right_indices)| device |(right_halo, left_indices)
+        
+        Arguments:
+            f: jax.ndarray
+                Sharded array storing the distribution function
+
+        """
+        f = self.streaming_p(f)
+        left_comm, right_comm = f[:1, ..., self.lattice.right_indices], f[-1:, ..., self.left_indices]
+        left_comm, right_comm = self.send_right(left_comm, 'x'), self.send_left(right_comm, 'x')
+        f = f.at[:1, ..., self.lattice.right_indices].set(left_comm)
+        f = f.at[-1:, ..., self.lattice.left_indices].set(right_comm)
+        return f
             
     def compute_macroscopic_variables(self,f):
         """
-            Compute the macroscopic variables density (rho) and velocity (u) using the distributions.
+        Compute the macroscopic variables density (rho) and velocity (u) using the distributions.
 
-            Arguments:
-                f: Array-like
-                    Distribution array, storing distribution for all lattice nodes for all directions. 
+        Arguments:
+            f: Array-like
+                Distribution array, storing distribution for all lattice nodes for all directions. 
 
-            Returns:
-                rho: Array-like
-                    Density at each lattice nodes. 
-                u: Array-like
-                    Velocity at each lattice nodes.
+        Returns:
+            rho: Array-like
+                Density at each lattice nodes. 
+            u: Array-like
+                Velocity at each lattice nodes.
         """
         rho = jnp.sum(f, axis=-1)
         u = jnp.dot(f, self.e) / rho
         return rho, u
     
     @partial(jit, static_argnums=(0,2))
-    def equillibrium(self,rho,u):
+    def equilibrium(self,rho,u):
         """
-            Compute the equillibrium distribution function using the given values of density and velocity.
+        Compute the equillibrium distribution function using the given values of density and velocity.
 
-            Arguments:
-                rho: Array-like
-                    Density values.
-                u: Array-like
-                    Velocity values. 
+        Arguments:
+            rho: Array-like
+                Density values.
+            u: Array-like
+                Velocity values. 
 
-            Returns:
-                feq: Array-like
-                    Equillibrium distribution.
+        Returns:
+            feq: Array-like
+                Equillibrium distribution.
         """
         udote = jnp.dot(u,self.e)
         udotu = jnp.sum(jnp.square(u), axis=-1, keepdims=True, dtype=self.precision)
@@ -443,122 +694,68 @@ class LBMBase(object):
     @partial(jit, static_argnums=(0, 3), donate_argnums=(1,))
     def collision(self,fin,rho,u):
         """
-            Single GPU implementation of the collision step in the Lattice Boltzmann Method. Defined in collision model sub-class.
+        Single GPU implementation of the collision step in the Lattice Boltzmann Method. Defined in collision model sub-class.
 
-            Arguments:
-                fin: Array-like
-                    Distribution function.
-                rho: Array-like
-                    Density at all the lattice nodes.
-                u: Array-like
-                    Velocity at all the lattice nodes.
-            
-            Returns:
-                fout: Array-like
-                    Distribution function.
+        Arguments:
+            fin: Array-like
+                Distribution function.
+            rho: Array-like
+                Density at all the lattice nodes.
+            u: Array-like
+                Velocity at all the lattice nodes.
+        
+        Returns:
+            fout: Array-like
+                Distribution function.
         """
         pass
-
-    @partial(jit, static_argnums=(0,), donate_argnums=(1,))
-    def stream(self,f):
-        """
-            Single GPU implementation of streaming step in the Lattice Boltzmann Method. 
-            Used for performing streaming and for computing the solid-mask.
-            
-            Arguments:
-                f: Array-like
-                    Any array which needs to be streamed. 
-                    Can be the distribution array or the solid mask array (To create grid mask array).
-
-            Returns:
-                f: Array-like
-                    The array obtained after streaming operation.
-        """
-        e = self.e
-        f = jnp.roll(f,(e[0], e[1], e[2]),axis=(0, 1, 2))
-        return f
-
-    @partial(jit, static_argnums=(0,))
-    def create_grid_mask(self):
-        """
-            Create the binary mask for the known and unknown directions in the lattice.
-
-            Arguments:
-                None
-
-            Returns:
-                None
-        """
-        self.grid_mask = self.stream(self.solid_mask)
 
     @partial(jit, static_argnums=(0,4))
     def apply_boundary_conditions(self,fout,fin,timestep,implementation_step):
         """
-            Apply the boundary condition to the grid points identified in the boundary_indices (see boundary_conditions.py)
+        Apply the boundary condition to the grid points identified in the boundary_indices (see boundary_conditions.py)
 
-            Arguments:
-                fout: Array-like
-                    Output distribution function.
-                fin: Array-like
-                    Input distribution function.
-                timestep: int
-                    Timestep to be used for applying the boundary condition. 
-                    Useful for dynamic boundary conditions, such as moving wall boundary condition.
-                implementation_step: str
-                    The implementation step is matched for boundary condition for all the lattice points.
-            
-            Returns:
-                fout: Array-like
-                    Output distribution values at lattice nodes.
+        Arguments:
+            fout: Array-like
+                Output distribution function.
+            fin: Array-like
+                Input distribution function.
+            timestep: int
+                Timestep to be used for applying the boundary condition. 
+                Useful for dynamic boundary conditions, such as moving wall boundary condition.
+            implementation_step: str
+                The implementation step is matched for boundary condition for all the lattice points.
+        
+        Returns:
+            fout: Array-like
+                Output distribution values at lattice nodes.
         """
         fout = fin
         for bc in self.boundary_conditions:
-            fout = bc.apply(fout,fin,timestep,implementation_step)
-
+            if bc.is_solid:
+                fout = fout.at[bc.indices].set(bc.apply(fout, fin, timestep, implementation_step))
+            else:
+                fout = bc.apply(fout, fin, timestep, implementation_step)
         return fout
 
-    def initialize_arrays(self):
-        """
-            Create and initialize jax.numpy array with a given precision for f, rho and u
-
-            Initial value of the distribution is the equillibrium value as determined by rho0 and u0
-
-            Arguments:
-                None
-        """
-        if self.d == 2:
-            rho = jnp.ones((self.nx,self.ny,self.q),dtype=self.precision)
-            u = jnp.zeros((self.nx,self.ny,self.q),dtype=self.precision)
-        elif self.d == 3:
-            rho = jnp.ones((self.nx,self.ny,self.nz,self.q),dtype=self.precision)
-            u = jnp.zeros((self.nx,self.ny,self.nz,self.q),dtype=self.precision)
-
-        # Assign the initial value to the density and velocity arrays
-        rho = rho.at[:].set(self.rho0)
-        u = u.at[:].set(self.u0)
-
-        # Initialize the distribution array
-        f = self.equillibrium(rho,u)
-        return f, rho, u
-
     @partial(jit, static_argnums=(0,1))
-    def calculate_mlups(self,t_total):
+    def calculate_mlups(self, t_total):
         """
-            Calculate the performance of the LBM code using MLUPS: Million Lattice Updates Per Second (MLUPS)
-            Formula:
-                (mesh_size * no_of_iterations) / (total_running_time * 1e6)
+        Calculate the performance of the LBM code using MLUPS: Million Lattice Updates Per Second (MLUPS)
+        Formula:
+            (mesh_size * no_of_iterations) / (total_running_time * 1e6)
 
-                where:
-                    mesh_size = nx*ny in 2D and nx*ny*nz in 3D
-                    total_time = t_simulation_stop - t_simulation_time
+            where:
+                mesh_size = nx*ny in 2D and nx*ny*nz in 3D
+                total_time = t_simulation_stop - t_simulation_time
 
-            Arguments:
-                t_total: float
-                    Total time elapsed for computing all the steps in the simulation. 
+        Arguments:
+            t_total: float
+                Total time elapsed for computing all the steps in the simulation. 
 
-            Returns:
-                mlups: float
-                    The MLUPS value for the simulation.
+        Returns:
+            mlups: float
+                The MLUPS value for the simulation.
         """
         if self.lattice.d == 2:
             mlups = (self.nx * self.ny * self.total_timesteps) / (t_total * 1e6)
@@ -567,75 +764,247 @@ class LBMBase(object):
         return mlups
     
     @partial(jit, static_argnums=(0,3))
-    def step(self,fin,rho,u):
+    def step(self, fin, rho, u):
         """
-            Perform one step of LBM simulation. The sequence of operation is:
-            1. Collide
-            2. Apply/store values of distribution for specific nodes, if necessary (useful for the halfway bounce-back boundary condition)
-            3. Stream
-            4. Apply boundary conditions for the specific nodes.
-            5. Modify the distribution if corresponding body force model is present.
-            6. Apply body force to the macroscopic flow variables if corresponding body force model is present.
-            7. Return the distribution the macroscopic flow data.
+        Perform one step of LBM simulation. The sequence of operation is:
+        1. Collide
+        2. Apply/store values of distribution for specific nodes, if necessary (useful for the halfway bounce-back boundary condition)
+        3. Stream
+        4. Apply boundary conditions for the specific nodes.
+        5. Modify the distribution if corresponding body force model is present.
+        6. Apply body force to the macroscopic flow variables if corresponding body force model is present.
+        7. Return the distribution the macroscopic flow data.
 
-            Arguments:
-                fin: Array-like
-                    Input distribution function.
-                rho: Array-like
-                    Density values.
-                u: Array-like
-                    Velocity values.
+        Arguments:
+            fin: Array-like
+                Input distribution function.
+            rho: Array-like
+                Density values.
+            u: Array-like
+                Velocity values.
 
-            Returns:
-                fout: Array-like
-                    Output distribution function.
-                rho: Array-like
-                    Density values.
-                u: Array-like
-                    Velocity values.
+        Returns:
+            fout: Array-like
+                Output distribution function.
+            rho: Array-like
+                Density values.
+            u: Array-like
+                Velocity values.
         """
         f_postcollision = self.collision(fin,rho,u)
         f_postcollision = self.apply_boundary_conditions(f_postcollision,"post_collision")
         f_poststreaming = self.stream(f_postcollision)
-        fout = self.apply_boundary_conditions(f_poststreaming,"post_streaming")
+        f_poststreaming = self.apply_boundary_conditions(f_poststreaming,"post_streaming")
 
-        # First apply body force using models where the distribution is modified
-        fout, rho, u = self.body_force.apply(fout,rho,u,"distribution")
-
-        # Compute new macroscopic flow variables if the distribution has been modified
-        rho, u = self.compute_macroscopic_variables(fout)
-
-        # Modify the macroscopic variables if the force model requires them to be modified instead of the distribution
-        fout = self.body_force.apply(fout,rho,u,"macroscopic")
-        rho, u = self.compute_macroscopic_variables(fout)
-
-        return fout, rho, u
+        if self.return_post_col_dist:
+            return f_poststreaming, f_postcollision, rho, u
+        else:
+            return f_poststreaming, rho, u
 
     def run(self):
         """
-            Run the LBM simulation using the given parameters. 
-            The sequence of operations are:
-            1. Initialization
-            2. Compute a single LBM step
-            3. Export the flow variables depending on the export parameters.
-            4. Post simulation steps (logging, MLUPS calculation etc....)
+        This function runs the LBM simulation for a specified number of time steps.
 
-            Arguments:
-                None
+        It first initializes the distribution functions and then enters a loop where it performs the 
+        simulation steps (collision, streaming, and boundary conditions) for each time step.
+
+        The function can also print the progress of the simulation, save the simulation data, and 
+        compute the performance of the simulation in million lattice updates per second (MLUPS).
+
+        Parameters:
+            t_max: int
+                The total number of time steps to run the simulation.
+        Returns:
+            f: jax.numpy.ndarray
+                The distribution functions after the simulation.
         """
-        f, rho, u = self.initialize_arrays()
-        t_total = 0.0
+        f = self.assign_fields_sharded()
+        start_step = 0
+        if self.restore_checkpoint:
+            latest_step = self.mngr.latest_step()
+            if latest_step is not None:  # existing checkpoint present
+                # Assert that the checkpoint manager is not None
+                assert self.mngr is not None, "Checkpoint manager does not exist."
+                state = {'f': f}
+                shardings = jax.tree_map(lambda x: x.sharding, state)
+                restore_args = orb.checkpoint_utils.construct_restore_args(state, shardings)
+                try:
+                    f = self.mngr.restore(latest_step, restore_kwargs={'restore_args': restore_args})['f']
+                    print(f"Restored checkpoint at step {latest_step}.")
+                except ValueError:
+                    raise ValueError(f"Failed to restore checkpoint at step {latest_step}.")
+                
+                start_step = latest_step + 1
+                if not (t_max > start_step):
+                    raise ValueError(f"Simulation already exceeded maximum allowable steps (t_max = {t_max}). Consider increasing t_max.")
 
-        # Perform the computation
-        for t in range(self.total_timesteps):
-            t_start = time.time() 
-            f, rho, u = self.step(f,rho,u)
-            t_end = time.time()
-            t_total += (t_end - t_start)
+        if self.computeMLUPS:
+            start = time.time()
 
-            if (t - self.write_start > 0) and ((t - self.write_start) % self.write_control == 0):
-                write_vtk(self.filename_prefix,t,rho,u,self.conv_param,self.lattice,self.precision)
+        # Loop over all time steps
+        for timestep in range(start_step, t_max + 1):
+            io_flag = self.ioRate > 0 and (timestep % self.ioRate == 0 or timestep == t_max)
+            print_iter_flag = self.printInfoRate> 0 and timestep % self.printInfoRate== 0
+            checkpoint_flag = self.checkpointRate > 0 and timestep % self.checkpointRate == 0
 
-        if self.compute_mlups:
+            if io_flag:
+                # Update the macroscopic variables and save the previous values (for error computation)
+                rho_prev, u_prev = self.update_macroscopic(f)
+                rho_prev = downsample_field(rho_prev, self.downsamplingFactor)
+                u_prev = downsample_field(u_prev, self.downsamplingFactor)
+                # Gather the data from all processes and convert it to numpy arrays (move to host memory)
+                rho_prev = process_allgather(rho_prev)
+                u_prev = process_allgather(u_prev)
+
+            # Perform one time-step (collision, streaming, and boundary conditions)
+            f, fstar = self.step(f, timestep, return_fpost=self.returnFpost)
+            # Print the progress of the simulation
+            if print_iter_flag:
+                print(colored("Timestep ", 'blue') + colored(f"{timestep}", 'green') + colored(" of ", 'blue') + colored(f"{t_max}", 'green') + colored(" completed", 'blue'))
+
+            if io_flag:
+                # Save the simulation data
+                print(f"Saving data at timestep {timestep}/{t_max}")
+                rho, u = self.update_macroscopic(f)
+                rho = downsample_field(rho, self.downsamplingFactor)
+                u = downsample_field(u, self.downsamplingFactor)
+                
+                # Gather the data from all processes and convert it to numpy arrays (move to host memory)
+                rho = process_allgather(rho)
+                u = process_allgather(u)
+
+                # Save the data
+                self.handle_io_timestep(timestep, f, fstar, rho, u, rho_prev, u_prev)
+            
+            if checkpoint_flag:
+                # Save the checkpoint
+                print(f"Saving checkpoint at timestep {timestep}/{t_max}")
+                state = {'f': f}
+                self.mngr.save(timestep, state)
+            
+            # Start the timer for the MLUPS computation after the first timestep (to remove compilation overhead)
+            if self.computeMLUPS and timestep == 1:
+                jax.block_until_ready(f)
+                start = time.time()
+
+        if self.computeMLUPS:
+            # Compute and print the performance of the simulation in MLUPS
             jax.block_until_ready(f)
-            mlups = self.calculate_mlups(t_total)
+            end = time.time()
+            if self.dim == 2:
+                print(colored("Domain: ", 'blue') + colored(f"{self.nx} x {self.ny}", 'green') if self.dim == 2 else colored(f"{self.nx} x {self.ny} x {self.nz}", 'green'))
+                print(colored("Number of voxels: ", 'blue') + colored(f"{self.nx * self.ny}", 'green') if self.dim == 2 else colored(f"{self.nx * self.ny * self.nz}", 'green'))
+                print(colored("MLUPS: ", 'blue') + colored(f"{self.nx * self.ny * t_max / (end - start) / 1e6}", 'red'))
+
+            elif self.dim == 3:
+                print(colored("Domain: ", 'blue') + colored(f"{self.nx} x {self.ny} x {self.nz}", 'green'))
+                print(colored("Number of voxels: ", 'blue') + colored(f"{self.nx * self.ny * self.nz}", 'green'))
+                print(colored("MLUPS: ", 'blue') + colored(f"{self.nx * self.ny * self.nz * t_max / (end - start) / 1e6}", 'red'))
+
+        return f
+    
+    def handle_io_timestep(self, timestep, f, fstar, rho, u, rho_prev, u_prev):
+        """
+        This function handles the input/output (I/O) operations at each time step of the simulation.
+
+        It prepares the data to be saved and calls the output_data function, which can be overwritten 
+        by the user to customize the I/O operations.
+
+        Parameters:
+            timestep: int
+                The current time step of the simulation.
+            f: jax.numpy.ndarray
+                The post-streaming distribution functions at the current time step.
+            fstar: jax.numpy.ndarray
+                The post-collision distribution functions at the current time step.
+            rho: jax.numpy.ndarray
+                The density field at the current time step.
+            u: jax.numpy.ndarray
+                The velocity field at the current time step.
+        """
+        kwargs = {
+            "timestep": timestep,
+            "rho": rho,
+            "rho_prev": rho_prev,
+            "u": u,
+            "u_prev": u_prev,
+            "f_poststreaming": f,
+            "f_postcollision": fstar
+        }
+        self.output_data(**kwargs)
+
+    def output_data(self, **kwargs):
+        """
+        This function is intended to be overwritten by the user to customize the input/output (I/O) 
+        operations of the simulation.
+
+        By default, it does nothing. When overwritten, it could save the simulation data to files, 
+        display the simulation results in real time, send the data to another process for analysis, etc.
+
+        Parameters:
+            **kwargs: dict
+                A dictionary containing the simulation data to be outputted. The keys are the names of the 
+                data fields, and the values are the data fields themselves.
+        """
+        pass
+
+    def set_boundary_conditions(self):
+        """
+        This function sets the boundary conditions for the simulation.
+
+        It is intended to be overwritten by the user to specify the boundary conditions according to 
+        the specific problem being solved.
+
+        By default, it does nothing. When overwritten, it could set periodic boundaries, no-slip 
+        boundaries, inflow/outflow boundaries, etc.
+        """
+        pass
+
+    def get_force(self):
+        """
+        This function computes the force to be applied to the fluid in the Lattice Boltzmann Method.
+
+        It is intended to be overwritten by the user to specify the force according to the specific 
+        problem being solved.
+
+        By default, it does nothing and returns None. When overwritten, it could implement a constant 
+        force term.
+
+        Returns:
+            force: jax.numpy.ndarray
+                The force to be applied to the fluid.
+        """
+        return self.body_force.F
+
+    @partial(jit, static_argnums=(0,), inline=True)
+    def apply_force(self, f_postcollision, feq, rho, u):
+        """
+        add force based on exact-difference method due to Kupershtokh
+
+        Parameters:
+            f_postcollision: jax.numpy.ndarray
+                The post-collision distribution functions.
+            feq: jax.numpy.ndarray
+                The equilibrium distribution functions.
+            rho: jax.numpy.ndarray
+                The density field.
+
+            u: jax.numpy.ndarray
+                The velocity field.
+
+        Returns:
+            f_postcollision: jax.numpy.ndarray
+                The post-collision distribution functions with the force applied.
+        
+        References:
+            Kupershtokh, A. (2004). New method of incorporating a body force term into the lattice Boltzmann equation. In
+            Proceedings of the 5th International EHD Workshop (pp. 241-246). University of Poitiers, Poitiers, France.
+
+            Chikatamarla, S. S., & Karlin, I. V. (2013). Entropic lattice Boltzmann method for turbulent flow simulations:
+            Boundary conditions. Physica A, 392, 1925-1930.
+            Krüger, T., et al. (2017). The lattice Boltzmann method. Springer International Publishing, 10.978-3, 4-15.
+        """
+        delta_u = self.get_force()
+        feq_force = self.equilibrium(rho, u + delta_u, cast_output=False)
+        f_postcollision = f_postcollision + feq_force - feq
+        return f_postcollision

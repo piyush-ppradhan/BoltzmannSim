@@ -16,15 +16,16 @@ class BodyForce(object):
                 "distribution": Changes to the distribution values. (For Guo force model).
                 "macroscopic": Changes the macroscopic values for incorporating the body force. (For Shan-Chen force model)
     """
-    def __init__(self,F,implementation_step):
+    def __init__(self,F,conversion_parameters):
         self.F = F
         self.implementation_step = implementation_step
+        self.conversion_parameters = conversion_parameters
 
-    def convert_to_lattice_units(self,conv_param):
+    def convert_to_lattice_units(self):
         """
             Convert the force in SI units to lattice units 
         """
-        self.F = F / (self.C_rho * (self.C_l**4) * (self.C_t**0.5))
+        self.F = F / (self.conversion_parameters.C_rho * (self.conversion_parameters.C_l**4) * (self.conversion_parameters.C_t**0.5))
     
     def apply(self,f,rho,u,step,precision):
         """

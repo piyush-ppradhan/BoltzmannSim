@@ -41,6 +41,8 @@ class Lattice(object):
         self.w = jnp.array(self.construct_lattice_weights(),dtype=self.precision)
         self.main_indices = self.construct_main_velocity_indices()
         self.opposite_indices = self.construct_opposite_directions_indices()
+        self.left_indices = jnp.array(self.construct_left_indices(), dtype=jnp.int8)
+        self.right_indices = jnp.array(self.construct_right_indices(), dtype=jnp.int8)
     
     def construct_velocity_directions(self):
         """
