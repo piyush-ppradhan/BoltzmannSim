@@ -24,7 +24,7 @@ class BGK(LBMBase):
 class MRT(LBMBase):
     """
         Multi-Relaxation Time (MRT) model for the collision step of the Lattice Botlzmann Method
-        Coveney et.al “Multiple–Relaxation–Time Lattice Boltzmann Models in Three Dimensions.” 
+        Coveney et.al “Multiple-Relaxation-Time Lattice Boltzmann Models in Three Dimensions.” 
         https://doi.org/10.1098/rsta.2001.0955.
 
         Attributes:

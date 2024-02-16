@@ -3,25 +3,25 @@ import numpy as np
 
 class Lattice(object):
     """
-        Parent class to define the lattice used for simulation.
+    Parent class to define the lattice used for simulation.
 
-        Attributes:
-            d: int
-                Dimension of the problem
-            q: int
-                Number of discrete directions used in the lattice stencil
-            stencil: str
-                Lattice stencil used in the simulation. "D2Q9", "D3Q19", "D3Q27"
-            precision: str
-                Precision for computation and exporting data. "f16", "f32", "f64". Default: "f32"
-            w: array[float]
-                Weights used for LBM calculation
-            e: array[int]
-                Discrete velocity directions present in the stencil
-            main_indices: array[int]
-                Index of main directions in the discrete velocity set.
-            oppsite_indices: array[int]
-                Opposite direction for each discrete velocity direction, useful for applying bounce-back boundary conditions
+    Attributes:
+        d: int
+            Dimension of the problem
+        q: int
+            Number of discrete directions used in the lattice stencil
+        stencil: str
+            Lattice stencil used in the simulation. "D2Q9", "D3Q19", "D3Q27"
+        precision: str
+            Precision for computation and exporting data. "f16", "f32", "f64". Default: "f32"
+        w: array[float]
+            Weights used for LBM calculation
+        e: array[int]
+            Discrete velocity directions present in the stencil
+        main_indices: array[int]
+            Index of main directions in the discrete velocity set.
+        oppsite_indices: array[int]
+            Opposite direction for each discrete velocity direction, useful for applying bounce-back boundary conditions
     """
     def __init__(self,stencil,precision):
         self.d = int(stencil[1])
@@ -46,14 +46,14 @@ class Lattice(object):
     
     def construct_velocity_directions(self):
         """
-            Compute discrete velocity directions for a given lattice stencil.
-            
-            Arguments:
-                None
+        Compute discrete velocity directions for a given lattice stencil.
+        
+        Arguments:
+            None
 
-            Returns:
-                e: array[int]
-                    Discrete velocity directions for given lattice.
+        Returns:
+            e: array[int]
+                Discrete velocity directions for given lattice.
         """
         match(self.stencil):
             case "D2Q9":
@@ -72,14 +72,14 @@ class Lattice(object):
 
     def construct_main_velocity_indices(self):
         """
-            Compute the index of the main directions in the discrete velocity set. 
+        Compute the index of the main directions in the discrete velocity set. 
 
-            Arguments:
-                None
-            
-            Returns:
-                main_indices: array[int]
-                    Indices of the main directions in the discrete velocity set.
+        Arguments:
+            None
+        
+        Returns:
+            main_indices: array[int]
+                Indices of the main directions in the discrete velocity set.
         """
         e = np.transpose(self.e)
         if self.d == 2:
@@ -90,14 +90,14 @@ class Lattice(object):
 
     def construct_opposite_directions_indices(self):
         """
-            Compute the index of the opposite direction for each direction in the discrete velocity set.
+        Compute the index of the opposite direction for each direction in the discrete velocity set.
 
-            Arguments:
-                None
-            
-            Returns:
-                array[int]
-                Indices for the opposite direction for velocity directions
+        Arguments:
+            None
+        
+        Returns:
+            array[int]
+            Indices for the opposite direction for velocity directions
         """
         e = np.transpose(self.e)
         opposite_indices = np.array([e.tolist().index((-e[i]).tolist()) for i in range(self.d)])
@@ -127,14 +127,14 @@ class Lattice(object):
 
     def construct_lattice_weights(self):
         """
-            Compute weights for a given lattice stencil.
-            
-            Arguments:
-                None
+        Compute weights for a given lattice stencil.
+        
+        Arguments:
+            None
 
-            Returns:
-                w: array[float]
-                    Lattice weights used for computation.
+        Returns:
+            w: array[float]
+                Lattice weights used for computation.
         """
         e = self.construct_velocity_directions()
         match(self.stencil):
@@ -184,16 +184,16 @@ class Lattice(object):
 
 class D2Q9(Lattice):
     """
-        D2Q9(precision)
-        Lattice definition for D2Q9 lattice derived from the Lattice parent class.
+    D2Q9(precision)
+    Lattice definition for D2Q9 lattice derived from the Lattice parent class.
 
-        Attributes:
-            d: int = 2
-            q: int = 9
-            stencil: str = "D2Q9"
-            precision:str = "f16", "f32", "f64" Default: "f32"
-            w: Array-like
-            e: Array-like
+    Attributes:
+        d: int = 2
+        q: int = 9
+        stencil: str = "D2Q9"
+        precision:str = "f16", "f32", "f64" Default: "f32"
+        w: Array-like
+        e: Array-like
     """
     def __init__(self,precision="f32"):
         super().__init__("D2Q9",precision)
@@ -201,29 +201,29 @@ class D2Q9(Lattice):
 
     def compute_constants(self):
         """
-            Compute the speed of sound (c_s) and its square (c_s2).
+        Compute the speed of sound (c_s) and its square (c_s2).
 
-            Arguments:
-                None
+        Arguments:
+            None
 
-            Returns:
-                None
+        Returns:
+            None
         """
         self.c_s = 1.0 / (3.0 ** 0.5)
         self.c_s2 = 1.0 / 3.0
 
 class D3Q19(Lattice):
     """
-        D3Q19(precision)
-        Lattice definition for D3Q19 lattice derived from the Lattice parent class.
+    D3Q19(precision)
+    Lattice definition for D3Q19 lattice derived from the Lattice parent class.
 
-        Attributes:
-            d: int = 3
-            q: int = 19
-            stencil: str = "D3Q19"
-            precision:str = "f16", "f32", "f64" Default: "f32"
-            w: array[float]
-            e: array[int]
+    Attributes:
+        d: int = 3
+        q: int = 19
+        stencil: str = "D3Q19"
+        precision:str = "f16", "f32", "f64" Default: "f32"
+        w: array[float]
+        e: array[int]
     """
     def __init__(self,precision="f32"):
         super().__init__("D3Q19",precision)
@@ -231,26 +231,26 @@ class D3Q19(Lattice):
 
     def compute_constants(self):
         """
-            Compute the speed of sound (c_s) and its square (c_s2).
+        Compute the speed of sound (c_s) and its square (c_s2).
 
-            Arguments:
-                None
+        Arguments:
+            None
         """
         self.c_s = 1.0 / (3.0 ** 0.5)
         self.c_s2 = 1.0 / 3.0
 
 class D3Q27(Lattice):
     """
-        D3Q27(precision)
-        Lattice definition for D3Q27 lattice derived from the Lattice parent class.
+    D3Q27(precision)
+    Lattice definition for D3Q27 lattice derived from the Lattice parent class.
 
-        Attributes:
-            d: int = 3
-            q: int = 27
-            stencil: str = "D3Q27"
-            precision:str = "f16", "f32", "f64" Default: "f32"
-            w: array[float]
-            e: array[int]
+    Attributes:
+        d: int = 3
+        q: int = 27
+        stencil: str = "D3Q27"
+        precision:str = "f16", "f32", "f64" Default: "f32"
+        w: array[float]
+        e: array[int]
     """
     def __init__(self,precision="f32"):
         super().__init__("D3Q27",precision)
@@ -258,10 +258,10 @@ class D3Q27(Lattice):
 
     def compute_constants(self):
         """
-            Compute the speed of sound (c_s) and its square (c_s2).
+        Compute the speed of sound (c_s) and its square (c_s2).
 
-            Arguments:
-                None 
+        Arguments:
+            None 
         """
         self.c_s = 1.0 / (3.0 ** 0.5)
         self.c_s2 = 1.0 / 3.0
