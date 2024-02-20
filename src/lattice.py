@@ -9,24 +9,24 @@ class Lattice(object):
         d: int
             Dimension of the problem
         q: int
-            Number of discrete directions used in the lattice stencil
-        stencil: str
-            Lattice stencil used in the simulation. "D2Q9", "D3Q19", "D3Q27"
+            Number of discrete directions used in the lattice name
+        name: str
+            Lattice name used in the simulation. "D2Q9", "D3Q19", "D3Q27"
         precision: str
             Precision for computation and exporting data. "f16", "f32", "f64". Default: "f32"
         w: array[float]
             Weights used for LBM calculation
         e: array[int]
-            Discrete velocity directions present in the stencil
+            Discrete velocity directions present in the name
         main_indices: array[int]
             Index of main directions in the discrete velocity set.
         oppsite_indices: array[int]
             Opposite direction for each discrete velocity direction, useful for applying bounce-back boundary conditions
     """
-    def __init__(self,stencil,precision):
-        self.d = int(stencil[1])
-        self.q = int(stencil[3])
-        self.stencil = stencil
+    def __init__(self, name, precision):
+        self.name = name
+        self.d = int(name[1])
+        self.q = int(name[3])
         match(precision):
             case "f16":
                 self.precision = jnp.float16
@@ -43,10 +43,11 @@ class Lattice(object):
         self.opposite_indices = self.construct_opposite_directions_indices()
         self.left_indices = jnp.array(self.construct_left_indices(), dtype=jnp.int8)
         self.right_indices = jnp.array(self.construct_right_indices(), dtype=jnp.int8)
+        self.ee = jnp.array(self.construct_lattice_moments(), dtype=jnp.int8)
     
     def construct_velocity_directions(self):
         """
-        Compute discrete velocity directions for a given lattice stencil.
+        Compute discrete velocity directions for a given lattice name.
         
         Arguments:
             None
@@ -55,20 +56,19 @@ class Lattice(object):
             e: array[int]
                 Discrete velocity directions for given lattice.
         """
-        match(self.stencil):
+        match(self.name):
             case "D2Q9":
                 ex = [0,1,0,-1,0,1,-1,-1,1]
                 ey = [0,0,1,0,-1,1,1,-1,-1]
-                e = np.array([tuple(zip(ex,ey))])
+                e = np.array([tuple(zip(ex,ey))]).squeeze()
             case "D3Q19":
                 e = np.array([(x,y,z) for x in [0,-1,1] for y in [0,-1,1] for z in [0,-1,1]])
                 e = e[np.linalg.norm(e, axis=1) < 1.45]
             case "D3Q19":
                 e = np.array([(x,y,z) for x in [-1,0,1] for y in [-1,0,1] for z in [-1,0,1]])
             case _:
-                ValueError("Invalid lattice stencil. Supported lattice stencil: D2Q9, D3Q19, D3Q27")
-                exit()
-        return e
+                raise ValueError("Invalid lattice name. Supported lattice name: D2Q9, D3Q19, D3Q27")
+        return e.T
 
     def construct_main_velocity_indices(self):
         """
@@ -99,7 +99,7 @@ class Lattice(object):
             array[int]
             Indices for the opposite direction for velocity directions
         """
-        e = np.transpose(self.e)
+        e = np.array(self.e).T
         opposite_indices = np.array([e.tolist().index((-e[i]).tolist()) for i in range(self.d)])
         return opposite_indices
 
@@ -127,7 +127,7 @@ class Lattice(object):
 
     def construct_lattice_weights(self):
         """
-        Compute weights for a given lattice stencil.
+        Compute weights for a given lattice name.
         
         Arguments:
             None
@@ -136,8 +136,8 @@ class Lattice(object):
             w: array[float]
                 Lattice weights used for computation.
         """
-        e = self.construct_velocity_directions()
-        match(self.stencil):
+        e = self.construct_velocity_directions().squeeze().T
+        match(self.name):
             case "D2Q9":
                 w = np.zeros(self.q)
                 w[np.linalg.norm(e,axis=1) < 1.1] = 1.0 / 9.0
@@ -154,7 +154,7 @@ class Lattice(object):
                 w[1.0 < np.linalg.norm(e,axis=1) < 1.45] = 1.0 / 54.0
                 w[0] = (8.0 / 27.0)
             case _:
-                ValueError("Invalid lattice stencil. Supported lattice stencil: D2Q9, D3Q19, D3Q27")
+                ValueError("Invalid lattice name. Supported lattice name: D2Q9, D3Q19, D3Q27")
                 exit()
         return w
     
@@ -190,7 +190,7 @@ class D2Q9(Lattice):
     Attributes:
         d: int = 2
         q: int = 9
-        stencil: str = "D2Q9"
+        name: str = "D2Q9"
         precision:str = "f16", "f32", "f64" Default: "f32"
         w: Array-like
         e: Array-like
@@ -220,7 +220,7 @@ class D3Q19(Lattice):
     Attributes:
         d: int = 3
         q: int = 19
-        stencil: str = "D3Q19"
+        name: str = "D3Q19"
         precision:str = "f16", "f32", "f64" Default: "f32"
         w: array[float]
         e: array[int]
@@ -247,7 +247,7 @@ class D3Q27(Lattice):
     Attributes:
         d: int = 3
         q: int = 27
-        stencil: str = "D3Q27"
+        name: str = "D3Q27"
         precision:str = "f16", "f32", "f64" Default: "f32"
         w: array[float]
         e: array[int]

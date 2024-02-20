@@ -1,18 +1,24 @@
 # System libraries
 import os
+from time import time
 from functools import partial
+import __main__
 
 # Custom libraries
 from conversion_parameters import *
 
 # Third-party libraries
+import matplotlib.pyplot as plt
+from matplotlib import cm
 import numpy as np
 import pyvista as pv
-import jax
+from termcolor import colored
+import trimesh
+
+# JAX specific libraries
 import jax.numpy as jnp
 from jax.image import resize
 from jax import jit
-import trimesh
 
 def read_raw_file(filename,width,height,depth=0,data_type=np.uint8):
   """
@@ -43,11 +49,46 @@ def read_raw_file(filename,width,height,depth=0,data_type=np.uint8):
     mask = raw_data.reshape((width,height,depth))
   return mask
 
-#TODO
+def save_image(timestep, fld, prefix=None):
+    """
+    Save an image of a field at a given timestep.
+
+    Parameters
+    ----------
+    timestep : int
+        The timestep at which the field is being saved.
+    fld : jax.numpy.ndarray
+        The field to be saved. This should be a 2D or 3D JAX array. If the field is 3D, the magnitude of the field will be calculated and saved.
+    prefix : str, optional
+        A prefix to be added to the filename. The filename will be the name of the main script file by default.
+
+    Returns
+    -------
+    None
+
+    Notes
+    -----
+    This function saves the field as an image in the PNG format. The filename is based on the name of the main script file, the provided prefix, and the timestep number.
+    If the field is 3D, the magnitude of the field is calculated and saved. The image is saved with the 'nipy_spectral' colormap and the origin set to 'lower'.
+    """
+    fname = os.path.basename(__main__.__file__)
+    fname = os.path.splitext(fname)[0]
+    if prefix is not None:
+        fname = prefix + fname
+    fname = fname + "_" + str(timestep).zfill(4)
+
+    if len(fld.shape) > 3:
+        raise ValueError("The input field should be 2D!")
+    elif len(fld.shape) == 3:
+        fld = np.sqrt(fld[..., 0] ** 2 + fld[..., 1] ** 2)
+
+    plt.clf()
+    plt.imsave(fname + '.png', fld.T, cmap=cm.nipy_spectral, origin='lower')
+
 def read_tiff_file(filename):
   pass
 
-def write_vtk(output_dir,prefix,time_step,fields,conv_param):
+def write_vtk(output_dir, prefix, time_step, fields, conv_param):
   """
   Write the macroscopic flow variables in a VTK file. The mesh is assumed to be structured and hence no coordinate information needs to be passed.
 
@@ -67,21 +108,35 @@ def write_vtk(output_dir,prefix,time_step,fields,conv_param):
   Returns:
     None
   """
-  grid = pv.ImageData()
-  grid.dimension = np.array(np.shape(fields["rho"])[0:-1]) + 1
+  if not os.path.exists("./"+output_dir):
+    print(colored("Directory does not exist, creating the directory " + output_dir))
+    os.makedirs(output_dir)
+
+  for key, val in fields.items():
+    if key == list(fields.keys())[0]:
+      dimensions = val.shape
+    else:
+       assert val.shape == dimensions, "All fields must have the same dimensions!"
+    
+  dimensions = tuple([dim + 1 for dim in dimensions])
+
+  if val.ndim == 2:
+    dimensions += (1,)
+      
+  grid = pv.ImageData(dimensions=dimensions)
   grid.origin = (0.0, 0.0, 0.0)
   # Scaling the lattice grid points using conversion parameters
   grid.spacing = (conv_param.C_l,conv_param.C_l,conv_param.C_l) 
 
   # Transfer the arrays to the memory from the host
-  for key, val in fields:
+  for key, val in fields.items():
     if key == "rho":
        grid[key] = conv_param.to_physical_units(val.flatten(order='F'), "density")
     elif key == "ux" or key == "uy" or key == "uz":
        grid[key] = conv_param.to_physical_units(val.flatten(order='F'), "velocity")
+  
   filename = os.path.join(output_dir, prefix+"_"+f"{time_step:07}.vtk")
-  grid.save(filename)
-
+  grid.save(filename, binary=True)
 @partial(jit, static_argnums=(1, 2))
 def downsample_field(field, factor, method='bicubic'):
   """

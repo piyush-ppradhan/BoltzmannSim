@@ -18,12 +18,12 @@ import jmp # Mixed precision library for JAX
 import jax.numpy as jnp
 from jax import jit, lax, vmap, config
 from jax.experimental import mesh_utils
-from jax.sharding import PositionalSharding, NamedSharding, PartitionSpec, Mesh
+from jax.sharding import NamedSharding, PartitionSpec, Mesh
 from jax.experimental.shard_map import shard_map
 from jax.experimental.multihost_utils import process_allgather
 
 # Locally defined functions import
-from body_force import NoBodyForce, ShanChenBodyForce, GuoBodyForce
+from lattice import *
 from utilities import write_vtk, downsample_field
 
 class LBMBase(object):
@@ -41,8 +41,6 @@ class LBMBase(object):
             Number of grid points in the z-direction. For 2D problem, nz = 0
         lattice: Lattice
             Lattice stencil used for simulation as defined in lattice.py
-        body_force: BodyForce
-            Define any volumetric forces to be applied during simulation as defined in body_force.py. Default: NoBodyForce()
         compute_precision: str
             Precision for computation and exporting the data. Same as lattice.precision Default: "f32"
         write_precision: str
@@ -50,7 +48,7 @@ class LBMBase(object):
         solid_mask: numpy.ndarray
             Mask that identifies all the solid nodes in the grid. Solid node: 0, Fluid node: 1
         boundary_conditions: BoundaryCondition
-            Boundary conditions used in the problem, defined as a list of objects of class BoundaryCondition.
+            Boundary conditions used in the problem, defined as a list of objects of class BoundaryCondition. Default: Empty i.e., no boundary conditions
         conv_param: ConversionParameter
             Conversion parameters to convert between Lattice Units and SI units.
         create_log: bool
@@ -84,12 +82,11 @@ class LBMBase(object):
         self.ny = kwargs.get("ny")
         self.nz = kwargs.get("nz",0)
         self.lattice = kwargs.get("lattice")
-        self.body_force = kwargs.get("body_force", NoBodyForce())
         self.compute_precision = self.set_precision(self.lattice.precision)
         self.write_precision = self.set_precision(kwargs.get("write_precision"))
         self.solid_mask = kwargs.get("solid_mask")
         self.total_timesteps = kwargs.get("total_timesteps")
-        self.boundary_conditions = kwargs.get("boundary_conditions") # The boundary conditions are passed during the problem definition
+        self.boundary_conditions = kwargs.get("boundary_conditions", []) # The boundary conditions are passed during the problem definition
         self.conv_param = kwargs.get("conversion_parameters")
         self.compute_mlups = kwargs.get("compute_MLUPS", False)
         self.checkpoint_rate = kwargs.get("checkpoint_rate", 0)
@@ -115,9 +112,7 @@ class LBMBase(object):
             config.update("jax_enable_x64", True)
             print(colored("Using 64-bit precision for computation.\n", 'yellow'))
             
-        self.precision_policy = jmp.Policy(compute_dtype=self._compute_precision,
-                                            param_dtype=self.compute_precision,
-                                            output_dtype=self.write_precision)
+        self.precision_policy = jmp.Policy(compute_dtype=self._compute_precision, param_dtype=self.compute_precision, output_dtype=self.write_precision)
             
         #Set the checkpoint manager
         if self.checkpoint_rate > 0:
@@ -229,7 +224,7 @@ class LBMBase(object):
     def lattice(self, value):
         if value is None:
             raise ValueError("Value must be provided")
-        if self.nz == 0:
+        if self.nz == 0 and not isinstance(value, D2Q9):
             raise ValueError("For 2D simulations, lattice must be D2Q9")
         if self.nz != 0 and value.name not in ['D3Q19', 'D3Q27']:
             raise ValueError("For 3D simulations, lattice must be D3Q19 or D3Q27")
@@ -243,7 +238,7 @@ class LBMBase(object):
     def body_force(self, value):
         if value is None:
             raise ValueError("Body force must be provided")
-        if not type(value).__name__ in ['NoBodyForce', 'ShanChenBodyForce', 'GuoBodyForce']:
+        if not type(value).__name__ in ["NoBodyForce", "ShanChenBodyForce", "GuoBodyForce"]:
             raise ValueError("Body force must be of type: NoBodyForce, ShanChenBodyForce or GuoBodyForce")
         self._body_force = value
 
@@ -254,9 +249,9 @@ class LBMBase(object):
     @compute_precision.setter
     def compute_precision(self, value):
         if value is None:
-            raise ValueError("Precison value must be provided.")
-        if value not in ["f16", "f32", "f64"]:
-            raise ValueError("Valid presion values are: \"f16\", \"f32\" or \"f64\"")
+            raise ValueError("Precision value must be provided.")
+        if value not in [jnp.float16, jnp.float32, jnp.float64]:
+            raise ValueError("Valid precision values are: \"f16\", \"f32\" or \"f64\"")
         self._compute_precision = value
 
     @property
@@ -267,7 +262,7 @@ class LBMBase(object):
     def write_precision(self, value):
         if value is None:
             raise ValueError("Write precison value must be provided.")
-        if value not in ["f16", "f32", "f64"]:
+        if value not in [jnp.float16, jnp.float32, jnp.float64]:
             raise ValueError("Valid presion values are: \"f16\", \"f32\" or \"f64\"")
         self._write_precision = value
 
@@ -631,7 +626,10 @@ class LBMBase(object):
                 Distribution function after streaming has been applied
         """
         def streaming_i(f, e):
-            return jnp.roll(f,(e[0], e[1], e[2]),axis=(0, 1, 2))
+            if self.d == 2:
+                return jnp.roll(f,(e[0], e[1]), axis=(0, 1))
+            elif self.d == 3:
+                return jnp.roll(f,(e[0], e[1], e[2]),axis=(0, 1, 2))
         return vmap(streaming_i, in_axes=(-1,0), out_axes=0)(fin, self.e.T)
     
     def streaming_m(self, f):
@@ -667,8 +665,8 @@ class LBMBase(object):
             u: Array-like
                 Velocity at each lattice nodes.
         """
-        rho = jnp.sum(f, axis=-1)
-        u = jnp.dot(f, self.e) / rho
+        rho = jnp.sum(f, axis=-1, keepdims=True)
+        u = jnp.dot(f, self.e.T) / rho
         return rho, u
     
     @partial(jit, static_argnums=(0,))
@@ -690,7 +688,7 @@ class LBMBase(object):
         jax.numpy.ndarray
             The computed momentum flux.
         """
-        return jnp.dot(fneq, self.lattice.cc)
+        return jnp.dot(fneq, self.lattice.ee)
     
     @partial(jit, static_argnums=(0,2))
     def equilibrium(self,rho,u,cast_output=True):
@@ -721,8 +719,8 @@ class LBMBase(object):
         else:
             return feq
 
-    @partial(jit, static_argnums=(0, 3), donate_argnums=(1,))
-    def collision(self,fin,rho,u):
+    @partial(jit, static_argnums=(0,), donate_argnums=(1,))
+    def collision(self,fin):
         """
         Single GPU implementation of the collision step in the Lattice Boltzmann Method. Defined in collision model sub-class.
 
@@ -741,7 +739,7 @@ class LBMBase(object):
         pass
 
     @partial(jit, static_argnums=(0,4))
-    def apply_boundary_conditions(self,fout,fin,timestep,implementation_step):
+    def apply_boundary_conditions(self, fout, fin, timestep, implementation_step):
         """
         Apply the boundary condition to the grid points identified in the boundary_indices (see boundary_conditions.py)
 
@@ -793,8 +791,8 @@ class LBMBase(object):
             mlups = (self.nx * self.ny * self.nz * self.total_timesteps) / (t_total * 1e6)
         return mlups
     
-    @partial(jit, static_argnums=(0,3))
-    def step(self, fin, rho, u):
+    @partial(jit, static_argnums=(0,2))
+    def step(self, f_poststreaming, timestep):
         """
         Perform one step of LBM simulation. The sequence of operation is:
         1. Collide
@@ -821,15 +819,15 @@ class LBMBase(object):
             u: Array-like
                 Velocity values.
         """
-        f_postcollision = self.collision(fin,rho,u)
-        f_postcollision = self.apply_boundary_conditions(f_postcollision,"post_collision")
+        f_postcollision = self.collision(f_poststreaming)
+        f_postcollision = self.apply_boundary_conditions(f_postcollision, f_poststreaming, timestep, "post_collision")
         f_poststreaming = self.streaming(f_postcollision)
-        f_poststreaming = self.apply_boundary_conditions(f_poststreaming,"post_streaming")
+        f_poststreaming = self.apply_boundary_conditions(f_poststreaming, f_postcollision, timestep, "post_streaming")
 
         if self.return_post_col_dist:
-            return f_poststreaming, f_postcollision, rho, u
+            return f_poststreaming, f_postcollision
         else:
-            return f_poststreaming, rho, u
+            return f_poststreaming, None
 
     def run(self):
         """
@@ -887,7 +885,7 @@ class LBMBase(object):
                 u_prev = process_allgather(u_prev)
 
             # Perform one time-step (collision, streaming, and boundary conditions)
-            f, fstar = self.step(f, timestep, return_fpost=self.return_post_col_dist)
+            f, fstar = self.step(f, timestep)
             # Print the progress of the simulation
             if print_iter_flag:
                 print(colored("Timestep ", 'blue') + colored(f"{timestep}", 'green') + colored(" of ", 'blue') + colored(f"{self.total_timesteps}", 'green') + colored(" completed", 'blue'))
@@ -1004,7 +1002,8 @@ class LBMBase(object):
             force: jax.numpy.ndarray
                 The force to be applied to the fluid.
         """
-        return self.body_force.F
+        pass
+
 
     @partial(jit, static_argnums=(0,), inline=True)
     def apply_force(self, f_postcollision, feq, rho, u):

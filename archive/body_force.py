@@ -39,7 +39,7 @@ class BodyForce(object):
 
 class NoBodyForce(BodyForce):
     def __init__(self):
-        super().__init__([0.0,0.0,0.0],"none") # Actual dimension of the force array does not matter, it is simply ignored
+        super().__init__("none", NoConversion(), [0.0,0.0,0.0]) # Actual dimension of the force array does not matter, it is simply ignored
     
     @partial(jit, static_argnums=(0,3))
     def apply(self,f,rho,u):
@@ -53,8 +53,8 @@ class ShanChenBodyForce(BodyForce):
     The body force F is applied by modifying the velocity, after calculating it using the distribution:
     u_new = u + F*dt_star / rho
     """
-    def __init__(self,F):
-        super().__init__(F,"macroscopic")
+    def __init__(self, conv_param, F):
+        super().__init__("macroscopic", conv_param, F)
 
     @partial(jit, static_argnums=(0,2), donate_argnums=(3,))
     def apply(self,f,rho,u,step,precision=jnp.float32):

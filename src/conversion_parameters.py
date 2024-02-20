@@ -35,7 +35,15 @@ class ConversionParameters(object):
             x: numpy.ndarray or jax.ndarray
                 Converted data.
         """
-        pass
+        match ttype:
+            case "velocity":
+                return x * (self.C_l / self.C_t)
+            case "density":
+                return x * self.C_rho
+            case "force":
+                return x * (self.C_rho * (self.C_l**4) * (self.C_t**0.5))
+            case _:
+                raise ValueError("Invalid type " + ttype)
 
     def to_lattice_units(self, x, ttype):
         """
@@ -52,11 +60,25 @@ class ConversionParameters(object):
                 Converted data.
         
         """
-        pass
+        match ttype:
+            case "velocity":
+                return x * (self.C_t / self.C_l)
+            case "density":
+                return x / self.C_rho
+            case "force":
+                return x / (self.C_rho * (self.C_l**4) * (self.C_t**0.5))
+            case _:
+                raise ValueError("Invalid type " + ttype)
 
     def print_conversion_parameters(self): 
         for attribute in self.attributes:
             print(attribute + ": " + getattr(self, attribute) + "\n")
+
+class NoConversion(ConversionParameters):
+    def __init__(self):
+        self.C_l = 1.0
+        self.C_rho = 1.0
+        self.C_t = 1.0
             
 class ReConversion(ConversionParameters):
     def __init__(self):
@@ -166,28 +188,7 @@ class ReConversion(ConversionParameters):
         elif tau_star > 1.0:
             ValueError("Tau must be less than or equal to 1.0 to ensure accuracy, choose different parameters")
         self.print_conversion_parameters()
-
-    def to_physical_units(self, x, ttype):
-        match ttype:
-            case "velocity":
-                return x * (self.C_l / self.C_t)
-            case "density":
-                return x * self.C_rho
-            case "force":
-                return x * (self.C_rho * (self.C_l**4) * (self.C_t**0.5))
-            case _:
-                raise ValueError("Invalid type " + ttype)
-            
-    def to_lattice_units(self, x, ttype):
-        match ttype:
-            case "velocity":
-                return x * (self.C_t / self.C_l)
-            case "density":
-                return x / self.C_rho
-            case "force":
-                return x / (self.C_rho * (self.C_l**4) * (self.C_t**0.5))
-            case _:
-                raise ValueError("Invalid type " + ttype)
+       
 
 
         
