@@ -24,7 +24,7 @@ from jax.experimental.multihost_utils import process_allgather
 
 # Locally defined functions import
 from lattice import *
-from utilities import write_vtk, downsample_field
+from utilities import downsample_field
 
 class LBMBase(object):
     """
@@ -86,7 +86,6 @@ class LBMBase(object):
         self.write_precision = self.set_precision(kwargs.get("write_precision"))
         self.solid_mask = kwargs.get("solid_mask")
         self.total_timesteps = kwargs.get("total_timesteps")
-        self.boundary_conditions = kwargs.get("boundary_conditions", []) # The boundary conditions are passed during the problem definition
         self.conv_param = kwargs.get("conversion_parameters")
         self.compute_mlups = kwargs.get("compute_MLUPS", False)
         self.checkpoint_rate = kwargs.get("checkpoint_rate", 0)
@@ -166,7 +165,8 @@ class LBMBase(object):
             raise ValueError("Dimension of the problem must be either 2 or 3")
 
         self.bounding_box_indices =  self.bounding_box_indices_()
-        self._create_boundary_condition_data()
+        self._create_boundary_data()
+        self.force = self.get_force()
 
     @property
     def omega(self):
@@ -433,7 +433,7 @@ class LBMBase(object):
             row = f"{colored(descriptive_name, 'blue'):>30} | {colored(value, 'yellow')}"
             print(row)
 
-    def _create_boundary_condition_data(self):
+    def _create_boundary_data(self):
         """
         Creates the data necessary for applying boundary conditions:
             1. Computing grid_mask
@@ -442,9 +442,20 @@ class LBMBase(object):
         Arguments:
             None
         """
-        solid_halo_list = [np.array(bc.boundary_indices) for bc in self.boundary_conditions if bc.is_solid]
-        solid_halo_voxels = np.unique(np.vstack(solid_halo_list)) if solid_halo_list else None
+        self.boundary_conditions = []
+        self.set_boundary_conditions()
+        solid_halo_list = [np.array(bc.boundary_indices).T for bc in self.boundary_conditions if bc.is_solid]
+        solid_halo_voxels = np.unique(np.vstack(solid_halo_list), axis=0) if solid_halo_list else None
+
+        start = time.time()
         grid_mask = self.create_grid_mask(solid_halo_voxels)
+        print("Time to create the grid mask: ", time.time() - start)
+
+        start = time.time()
+        for bc in self.boundary_conditions:
+            assert bc.implementation_step in ['post_streaming', 'post_collision']
+            bc.create_local_mask_and_normal_arrays(grid_mask)
+        print("Time to create the local masks and normal arrays:", time.time() - start)
 
     def distributed_array_init(self, shape, ttype, init_val = 0, sharding=None):
         """
@@ -537,43 +548,61 @@ class LBMBase(object):
         """
         hw_x = self.n_devices
         hw_y = hw_z = 1 
+        if self.d == 2:
+            grid_mask = self.distributed_array_init((self.nx + 2 * hw_x, self.ny + 2 * hw_y, self.lattice.q), jnp.bool_, init_val=True)
+            grid_mask = grid_mask.at[(slice(hw_x, -hw_x), slice(hw_y, -hw_y), slice(None))].set(False)
+            if solid_halo_voxels is not None:
+                solid_halo_voxels = solid_halo_voxels.at[:, 0].add(hw_x)
+                solid_halo_voxels = solid_halo_voxels.at[:, 1].add(hw_y)
+                grid_mask = grid_mask.at[tuple(solid_halo_voxels.T)].set(True)  
+
+            grid_mask = self.streaming(grid_mask)
+            return lax.with_sharding_constraint(grid_mask, self.sharding)
+
+        elif self.d == 3:
+            grid_mask = self.distributed_array_init((self.nx + 2 * hw_x, self.ny + 2 * hw_y, self.nz + 2 * hw_z, self.lattice.q), jnp.bool_, init_val=True)
+            grid_mask = grid_mask.at[(slice(hw_x, -hw_x), slice(hw_y, -hw_y), slice(hw_z, -hw_z), slice(None))].set(False)
+            if solid_halo_voxels is not None:
+                solid_halo_voxels = solid_halo_voxels.at[:, 0].add(hw_x)
+                solid_halo_voxels = solid_halo_voxels.at[:, 1].add(hw_y)
+                solid_halo_voxels = solid_halo_voxels.at[:, 2].add(hw_z)
+                grid_mask = grid_mask.at[tuple(solid_halo_voxels.T)].set(True)
+            grid_mask = self.streaming(grid_mask)
+            return lax.with_sharding_constraint(grid_mask, self.sharding)
         
     def bounding_box_indices_(self):
         """
-        This function returns the indices the lattice nodes at the boundries of the domain.
-        These points form the boundary edges in 2D and boundary faces in 3D.
-        Can be used to setup the boundary condition for the problem.
-        
-        Arguments:
-            None
-        
+        This function calculates the indices of the bounding box of a 2D or 3D grid.
+        The bounding box is defined as the set of grid points on the outer edge of the grid.
+
         Returns:
-            boundary_box: dict
-                Dictionary the key and corresponding indices for each boundary. 
-                The keys are "top", "bottom", "left", "right" for 2D and additional "front", "back" for 3D.
-                The indices are defined in numpy array
+            bounding_box: (dict)
+            A dictionary where keys are the names of the bounding box faces
+            ("bottom", "top", "left", "right" for 2D; additional "front", "back" for 3D), and values
+            are numpy arrays of indices corresponding to each face.
         """
         if self.d == 2:
-            # In 2D, the bounding edges are "left", "right", "top" and "bottom"
-            # Each edges is represented by array of slices. For example, the "left" edge comprises
-            # of all points where x = 0
-            return {
-                "left": np.array([(0,y) for y in range(self.ny)]),
-                "right": np.array([(self.nx-1,y) for y in range(self.ny)]),
-                "top": np.array([(x,self.ny-1) for x in range(self.nx)]),
-                "bottom": np.array([(x,0) for x in range(self.nx)])
-            }
+            # For a 2D grid, the bounding box consists of four edges: bottom, top, left, and right.
+            # Each edge is represented as an array of indices. For example, the bottom edge includes
+            # all points where the y-coordinate is 0, so its indices are [[i, 0] for i in range(self.nx)].
+            bounding_box = {"bottom": np.array([[i, 0] for i in range(self.nx)], dtype=int),
+                           "top": np.array([[i, self.ny - 1] for i in range(self.nx)], dtype=int),
+                           "left": np.array([[0, i] for i in range(self.ny)], dtype=int),
+                           "right": np.array([[self.nx - 1, i] for i in range(self.ny)], dtype=int)}
+            return bounding_box
+
         elif self.d == 3:
-            # Similar to 2D, but here array slices represent the boundary faces. For example,
-            # the "left" slices comprises all coordinates (x,y,z) where x = 0
-            return {
-                "left": np.array([(0,y,z) for y in range(self.ny) for z in range(self.nz)]),
-                "right": np.array([(self.nx-1,y,z) for y in range(self.ny) for z in range(self.nz)]),
-                "top": np.array([(x,self.ny-1,z) for x in range(self.nx) for z in range(self.nz)]),
-                "bottom": np.array([(x,0,z) for x in range(self.nx) for z in range(self.nz)]),
-                "front": np.array([(x,y,self.nz-1) for x in range(self.nx) for y in range(self.ny)]),
-                "back": np.array([(x,y,0) for x in range(self.nx) for y in range(self.ny)])
-            }
+            # For a 3D grid, the bounding box consists of six faces: bottom, top, left, right, front, and back.
+            # Each face is represented as an array of indices. For example, the bottom face includes all points
+            # where the z-coordinate is 0, so its indices are [[i, j, 0] for i in range(self.nx) for j in range(self.ny)].
+            bounding_box = {
+                "bottom": np.array([[i, j, 0] for i in range(self.nx) for j in range(self.ny)], dtype=int),
+                "top": np.array([[i, j, self.nz - 1] for i in range(self.nx) for j in range(self.ny)],dtype=int),
+                "left": np.array([[0, j, k] for j in range(self.ny) for k in range(self.nz)], dtype=int),
+                "right": np.array([[self.nx - 1, j, k] for j in range(self.ny) for k in range(self.nz)], dtype=int),
+                "front": np.array([[i, 0, k] for i in range(self.nx) for k in range(self.nz)], dtype=int),
+                "back": np.array([[i, self.ny - 1, k] for i in range(self.nx) for k in range(self.nz)], dtype=int)}
+            return bounding_box 
     
     def send_right(self, x, axis_name):
         """
@@ -630,7 +659,7 @@ class LBMBase(object):
                 return jnp.roll(f,(e[0], e[1]), axis=(0, 1))
             elif self.d == 3:
                 return jnp.roll(f,(e[0], e[1], e[2]),axis=(0, 1, 2))
-        return vmap(streaming_i, in_axes=(-1,0), out_axes=0)(fin, self.e.T)
+        return vmap(streaming_i, in_axes=(-1,0), out_axes=-1)(fin, self.e.T)
     
     def streaming_m(self, f):
         """
@@ -651,22 +680,23 @@ class LBMBase(object):
         f = f.at[-1:, ..., self.lattice.left_indices].set(right_comm)
         return f
             
-    def compute_macroscopic_variables(self,f):
+    def compute_macroscopic_variables(self, f):
         """
         Compute the macroscopic variables density (rho) and velocity (u) using the distributions.
 
         Arguments:
-            f: Array-like
+            f: jax.numpy.ndarray
                 Distribution array, storing distribution for all lattice nodes for all directions. 
 
         Returns:
-            rho: Array-like
+            rho: jax.numpy.ndarray
                 Density at each lattice nodes. 
-            u: Array-like
+            u: jax.numpy.ndarray
                 Velocity at each lattice nodes.
         """
         rho = jnp.sum(f, axis=-1, keepdims=True)
-        u = jnp.dot(f, self.e.T) / rho
+        e = jnp.array(self.e, dtype=self.precision_policy.compute_dtype).T
+        u = jnp.dot(f, e) / rho
         return rho, u
     
     @partial(jit, static_argnums=(0,))
@@ -678,20 +708,18 @@ class LBMBase(object):
         The momentum flux is used in the computation of the stress tensor in the Lattice Boltzmann 
         Method (LBM).
 
-        Parameters
-        ----------
-        fneq: jax.numpy.ndarray
-            The non-equilibrium distribution functions.
+        Parameters:
+            fneq: jax.numpy.ndarray
+                The non-equilibrium distribution functions.
 
-        Returns
-        -------
-        jax.numpy.ndarray
-            The computed momentum flux.
+        Returns:
+            jax.numpy.ndarray
+                The computed momentum flux.
         """
         return jnp.dot(fneq, self.lattice.ee)
     
-    @partial(jit, static_argnums=(0,2))
-    def equilibrium(self,rho,u,cast_output=True):
+    @partial(jit, static_argnums=(0,3))
+    def equilibrium(self, rho, u, cast_output=True):
         """
         Compute the equillibrium distribution function using the given values of density and velocity.
 
@@ -710,9 +738,10 @@ class LBMBase(object):
         if cast_output:
             rho, u = self.precision_policy.cast_to_compute((rho, u))
 
-        udote = jnp.dot(u,self.e)
-        udotu = jnp.sum(jnp.square(u), axis=-1, keepdims=True, dtype=self.compute_precision)
-        feq = jnp.array(self.w, dtype=self.compute_precision) * (rho * (1.0 + (3.0 + 4.5*udote)*udote - 1.5*udotu))
+        e = jnp.array(self.e, dtype=self.precision_policy.compute_dtype)
+        udote = jnp.dot(u, e)
+        udotu = jnp.sum(jnp.square(u), axis=-1, keepdims=True)
+        feq = rho * self.w * (1.0 + udote*(3.0 + 4.5*udote) - 1.5*udotu)
         
         if cast_output:
             return self.precision_policy.cast_to_output(feq)
@@ -720,9 +749,9 @@ class LBMBase(object):
             return feq
 
     @partial(jit, static_argnums=(0,), donate_argnums=(1,))
-    def collision(self,fin):
+    def collision(self, fin):
         """
-        Single GPU implementation of the collision step in the Lattice Boltzmann Method. Defined in collision model sub-class.
+        Implementation of the collision step in the Lattice Boltzmann Method. Defined in collision model sub-class.
 
         Arguments:
             fin: Array-like
@@ -758,12 +787,13 @@ class LBMBase(object):
             fout: Array-like
                 Output distribution values at lattice nodes.
         """
-        fout = fin
         for bc in self.boundary_conditions:
-            if bc.is_solid:
-                fout = fout.at[bc.indices].set(bc.apply(fout, fin, timestep, implementation_step))
-            else:
-                fout = bc.apply(fout, fin, timestep, implementation_step)
+            fout = bc.prepare_populations(fout, fin, implementation_step)
+            if bc.implementation_step == implementation_step:
+                if bc.is_dynamic:
+                    fout = bc.apply(fout, fin, timestep)
+                else:
+                    fout = fout.at[bc.boundary_indices].set(bc.apply(fout, fin))
         return fout
 
     @partial(jit, static_argnums=(0,1))
@@ -791,7 +821,7 @@ class LBMBase(object):
             mlups = (self.nx * self.ny * self.nz * self.total_timesteps) / (t_total * 1e6)
         return mlups
     
-    @partial(jit, static_argnums=(0,2))
+    @partial(jit, static_argnums=(0,), donate_argnums=(1,))
     def step(self, f_poststreaming, timestep):
         """
         Perform one step of LBM simulation. The sequence of operation is:
@@ -872,7 +902,7 @@ class LBMBase(object):
         # Loop over all time steps
         for timestep in range(start_step, self.total_timesteps + 1):
             io_flag = self.write_control > 0 and ((timestep - self.write_start) % self.write_control == 0 or timestep == self.total_timesteps)
-            print_iter_flag = self.print_info_rate> 0 and timestep % self.print_info_rate== 0
+            print_iter_flag = self.print_info_rate> 0 and timestep % self.print_info_rate == 0
             checkpoint_flag = self.checkpoint_rate > 0 and timestep % self.checkpoint_rate == 0
 
             if io_flag:
@@ -886,6 +916,7 @@ class LBMBase(object):
 
             # Perform one time-step (collision, streaming, and boundary conditions)
             f, fstar = self.step(f, timestep)
+
             # Print the progress of the simulation
             if print_iter_flag:
                 print(colored("Timestep ", 'blue') + colored(f"{timestep}", 'green') + colored(" of ", 'blue') + colored(f"{self.total_timesteps}", 'green') + colored(" completed", 'blue'))

@@ -36,19 +36,19 @@ class BoundaryCondition(object):
         needs_extra_configuration: bool
             Whether the boundary condition needs extra information (for example, the velocity boundary condition). Set in sub-class
     """
-    def __init__(self, lattice, boundary_indices, precision, nx, ny, nz=0):
-        self.lattice = lattice
+    def __init__(self, boundary_indices, grid_info, precision_policy):
+        self.lattice = grid_info["lattice"]
+        self.nx = grid_info["nx"]
+        self.ny = grid_info["ny"]
+        self.nz = grid_info["nz"]
+        self.dim = grid_info["dim"]
+        self.precision_policy = precision_policy
         self.boundary_indices = boundary_indices
-        self.nx = nx
-        self.ny = ny
-        self.nz = nz
-        match(precision):
-            case "f16":
-                self.precision = jnp.float16
-            case "f32":
-                self.precision = jnp.float32
-            case "f64":
-                self.precision = jnp.float64
+        self.name = None
+        self.is_solid = False
+        self.is_dynamic = False
+        self.needs_extra_configuration = False
+        self.implementation_step = "post_streaming"
     
     def create_local_mask_and_normal_arrays(self, grid_mask):
         """
@@ -109,7 +109,7 @@ class BoundaryCondition(object):
 
             This method should be overridden in subclasses if the boundary condition requires extra configuration.
         """
-        pass
+        return
 
     @partial(jit, static_argnums=(0, 3), inline=True)
     def prepare_populations(self, fout, fin, implementation_step):
@@ -144,9 +144,9 @@ class BoundaryCondition(object):
 
         This method calculates the normal vectors by dotting the boundary mask with the main lattice directions.
         """
-        main_c = self.lattice.c.T[self.lattice.main_indices]
+        main_e = self.lattice.e.T[self.lattice.main_indices]
         m = boundary_mask[..., self.lattice.main_indices]
-        normals = -np.dot(m, main_c)
+        normals = -np.dot(m, main_e)
         return normals
 
     def get_missing_indices(self, boundary_mask):
@@ -169,7 +169,7 @@ class BoundaryCondition(object):
         # Note: the "zero" index is used as default value here and won't affect BC computations
         nbd = len(self.boundary_indices[0])
         imissing = np.vstack([np.arange(self.lattice.q, dtype='uint8')] * nbd)
-        iknown = np.vstack([self.lattice.opp_indices] * nbd)
+        iknown = np.vstack([self.lattice.opposite_indices] * nbd)
         imissing[~boundary_mask] = 0
         iknown[~boundary_mask] = 0
         return imissing, iknown
@@ -196,7 +196,7 @@ class BoundaryCondition(object):
 
 
     @partial(jit, static_argnums=(0,))
-    def equillibrium(self, rho, u):
+    def equilibrium(self, rho, u):
         """
         Compute the equillibrium distribution for given density (rho) and velocity (u) values.
         Used for applying the Zou-He boundary condition.
@@ -205,12 +205,11 @@ class BoundaryCondition(object):
             feq: Array-like
                 The equillibrium distribution.
         """
-        e = self.lattice.e
-        w = self.lattice.w
-
+        rho, u = self.precision_policy.cast_to_compute((rho, u))
+        e = jnp.array(self.lattice.e, dtype=self.precision_policy.compute_dtype)
         udote = jnp.dot(u,e)
-        udotu = jnp.square(u)
-        feq = w * rho * (1.0 + 3.0 * udote + 4.5 * udote**2 - 1.5 * udotu)
+        udotu = jnp.sum(u**2, axis=-1, keepdims=True)
+        feq = rho * self.lattice.w * (1.0 + 3.0 * udote + 4.5 * udote**2 - 1.5 * udotu)
         return feq
 
     @partial(jit, static_argnums=(0,))
@@ -230,6 +229,62 @@ class BoundaryCondition(object):
         """
         pass
 
+    @partial(jit, static_argnums=(0,))
+    def momentum_flux(self, fneq):
+        """
+        Compute the momentum flux.
+
+        Parameters:
+            fneq : jax.numpy.ndarray
+                The non-equilibrium distribution function at each node in the lattice.
+
+        Returns:
+            jax.numpy.ndarray
+                The momentum flux at each node in the lattice.
+
+        Notes:
+            This method computes the momentum flux by dotting the non-equilibrium distribution function with the lattice
+            direction vectors.
+        """
+        return jnp.dot(fneq, self.lattice.cc)
+
+    @partial(jit, static_argnums=(0,))
+    def momentum_exchange_force(self, f_poststreaming, f_postcollision):
+        """
+        Using the momentum exchange method to compute the boundary force vector exerted on the solid geometry
+        based on [1] as described in [3]. Ref [2] shows how [1] is applicable to curved geometries only by using a
+        bounce-back method (e.g. Bouzidi) that accounts for curved boundaries.
+        NOTE: this function should be called after BC's are imposed.
+        [1] A.J.C. Ladd, Numerical simulations of particular suspensions via a discretized Boltzmann equation.
+            Part 2 (numerical results), J. Fluid Mech. 271 (1994) 311-339.
+        [2] R. Mei, D. Yu, W. Shyy, L.-S. Luo, Force evaluation in the lattice Boltzmann method involving
+            curved geometry, Phys. Rev. E 65 (2002) 041203.
+        [3] Caiazzo, A., & Junk, M. (2008). Boundary forces in lattice Boltzmann: Analysis of momentum exchange
+            algorithm. Computers & Mathematics with Applications, 55(7), 1415-1423.
+
+        Parameters:
+            f_poststreaming : jax.numpy.ndarray
+                The post-streaming distribution function at each node in the lattice.
+            f_postcollision : jax.numpy.ndarray
+                The post-collision distribution function at each node in the lattice.
+
+        Returns:
+            jax.numpy.ndarray
+                The force exerted on the solid geometry at each boundary node.
+
+        Notes:
+        This method computes the force exerted on the solid geometry at each boundary node using the momentum exchange method. 
+        The force is computed based on the post-streaming and post-collision distribution functions. This method
+        should be called after the boundary conditions are imposed.
+        """
+        e = jnp.array(self.lattice.e, dtype=self.precision_policy.compute_dtype)
+        nbd = len(self.boundary_indices[0])
+        bindex = np.arange(nbd)[:, None]
+        phi = f_postcollision[self.boundary_indices][bindex, self.iknown] + \
+              f_poststreaming[self.boundary_indices][bindex, self.imissing]
+        force = jnp.sum(e[:, self.iknown] * phi, axis=-1).T
+        return force
+
 class EquilibriumBC(BoundaryCondition):
     """
     Equilibrium boundary condition for a lattice Boltzmann method simulation.
@@ -247,11 +302,11 @@ class EquilibriumBC(BoundaryCondition):
             The equilibrium distribution function at the boundary nodes.
     """
 
-    def __init__(self, indices, gridInfo, precision_policy, rho, u):
-        super().__init__(indices, gridInfo, precision_policy)
-        self.out = self.precisionPolicy.cast_to_output(self.equilibrium(rho, u))
+    def __init__(self, indices, grid_info, precision_policy, rho, u):
+        super().__init__(indices, grid_info, precision_policy)
+        self.out = self.precision_policy.cast_to_output(self.equilibrium(rho, u))
         self.name = "EquilibriumBC"
-        self.implementationStep = "PostStreaming"
+        self.implementation_step = "post_streaming"
 
     @partial(jit, static_argnums=(0,))
     def apply(self, fout, fin):
@@ -281,12 +336,10 @@ class DoNothing(BoundaryCondition):
     Attributes:
         None
     """
-    def __init__(self, lattice, indices, precision, nx, ny, nz=0):
-        super().__init__(lattice, indices, precision, nx, ny, nz)
-        self.is_dynamic = False
-        self.is_solid = False
-        self.needs_extra_configuration = False
+    def __init__(self, indices, grid_info, precision,):
+        super().__init__(indices, grid_info, precision)
         self.implementation_step = "post_streaming"
+        self.name = "DoNothing"
 
     @partial(jit, static_argnums=(0,))
     def apply(self, fout, fin, timestep, implementation_step):
@@ -312,15 +365,15 @@ class HalfwayBounceBack(BoundaryCondition):
     Attributes:
         None
     """
-    def __init__(self, lattice, indices, precision, nx, ny, nz=0):
-        super().__init__(lattice, indices, precision, nx, ny, nz)
+    def __init__(self, indices, grid_info, precision):
+        super().__init__(indices, grid_info, precision)
         self.is_dynamic = False
         self.is_solid = True
         self.needs_extra_configuration = False
         self.implementation_step = "post_collision"
 
     @partial(jit, static_argnums=(0,))
-    def apply(self,fout,fin):
+    def apply(self, fout, fin):
         return fin[self.boundary_indices][..., self.lattice.opposite_indices]
 
 class ZouHe(BoundaryCondition):

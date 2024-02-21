@@ -99,9 +99,9 @@ class Lattice(object):
             array[int]
             Indices for the opposite direction for velocity directions
         """
-        e = np.array(self.e).T
-        opposite_indices = np.array([e.tolist().index((-e[i]).tolist()) for i in range(self.d)])
-        return opposite_indices
+        e = self.e.T
+        opposite = np.array([e.tolist().index((-e[i]).tolist()) for i in range(self.q)])
+        return opposite 
 
     def construct_right_indices(self):
         """

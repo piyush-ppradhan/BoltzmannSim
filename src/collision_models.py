@@ -1,3 +1,4 @@
+import jax
 import jax.numpy as jnp
 import numpy as np
 from base import *
@@ -10,15 +11,19 @@ class BGK(LBMBase):
         tau: float
             Relaxation parameter (non-dimensional)
     """
-    def __init__(self,**kwargs):
+    def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
     @partial(jit, static_argnums=(0,), donate_argnums=(1,))
-    def collision(self,f):
-        rho, u = self.compute_macroscopic_variables(f)
-        feq = self.equilibrium(rho,u)
-        f = f.at[:].set(f + self.omega*(feq - f))
-        return f
+    def collision(self, fin):
+        fin = self.precision_policy.cast_to_compute(fin)
+        rho, u = self.compute_macroscopic_variables(fin)
+        feq = self.equilibrium(rho, u, cast_output=False)
+        fneq = feq - fin
+        fout =  fin + self.omega*fneq
+        if self.force is not None:
+            fout = self.apply_force(fout, feq, rho, u)
+        return self.precision_policy.cast_to_output(fout)
 
 #TODO
 class MRT(LBMBase):

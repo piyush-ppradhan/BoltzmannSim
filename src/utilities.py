@@ -109,7 +109,7 @@ def write_vtk(output_dir, prefix, time_step, fields, conv_param):
     None
   """
   if not os.path.exists("./"+output_dir):
-    print(colored("Directory does not exist, creating the directory " + output_dir))
+    print(colored("Directory does not exist, creating the directory " + output_dir, "yellow"))
     os.makedirs(output_dir)
 
   for key, val in fields.items():
