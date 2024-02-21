@@ -342,7 +342,7 @@ class DoNothing(BoundaryCondition):
         self.name = "DoNothing"
 
     @partial(jit, static_argnums=(0,))
-    def apply(self, fout, fin, timestep, implementation_step):
+    def apply(self, fout, fin):
         """
         Applies no boundary condition to the provided boundary nodes. 
 
@@ -376,27 +376,342 @@ class HalfwayBounceBack(BoundaryCondition):
     def apply(self, fout, fin):
         return fin[self.boundary_indices][..., self.lattice.opposite_indices]
 
-class ZouHe(BoundaryCondition):
+class BounceBack(BoundaryCondition):
     """
-    Implement the Zou-He pressure and velocity boundary condition.
-    Zou, Qisu, and Xiaoyi He. “On Pressure and Velocity Boundary Conditions for the Lattice Boltzmann BGK Model.” 
-    Physics of Fluids 9, no. 6 (June 1, 1997): 1591-98. https://doi.org/10.1063/1.869307.
+    Bounce-back boundary condition for a lattice Boltzmann method simulation.
+
+    This class implements a full-way bounce-back boundary condition, where particles hitting the boundary are reflected
+    back in the direction they came from. The boundary condition is applied after the collision step.
+
+    Attributes:
+        name : str
+            The name of the boundary condition. For this class, it is "BounceBackFullway".
+        implementationStep : str
+            The step in the lattice Boltzmann method algorithm at which the boundary condition is applied. For this class,
+            it is "PostCollision".
     """
-    def __init__(self, bc_density, lattice, indices, precision, nx, ny, nz=0):
-        super().__init__(lattice,indices,precision,nx,ny,nz)
-        self.is_solid = False
-        self.is_dynamic = False
-        self.needs_extra_configuration = True
-    
+    def __init__(self, indices, gridInfo, precision_policy):
+        super().__init__(indices, gridInfo, precision_policy)
+        self.name = "BounceBackFullway"
+        self.implementation_step = "post_collision"
+
     @partial(jit, static_argnums=(0,))
     def apply(self, fout, fin):
         """
-        Apply boundary condition to the distribution f. Defined in subclass.
+        Applies the bounce-back boundary condition.
 
-        Arguments:
-            fout: array[float]
-                Output distribution array
-            fin: array[float]
-                Input distribution array
+        Parameters:
+            fout : jax.numpy.ndarray
+                The output distribution functions.
+            fin : jax.numpy.ndarray
+                The input distribution functions.
+
+        Returns:
+            jax.numpy.ndarray
+                The modified output distribution functions after applying the boundary condition.
+
+        Notes:
+        This method applies the bounce-back boundary condition by reflecting the input distribution functions at the
+        boundary nodes in the opposite direction.
         """
-        pass
+
+        return fin[self.boundary_indices][..., self.lattice.opposite_indices]
+
+class BounceBackMoving(BoundaryCondition):
+    """
+    Moving bounce-back boundary condition for a lattice Boltzmann method simulation.
+
+    This class implements a moving bounce-back boundary condition, where particles hitting the boundary are reflected
+    back in the direction they came from, with an additional velocity due to the movement of the boundary. The boundary
+    condition is applied after the collision step.
+
+    Attributes:
+        name : str
+            The name of the boundary condition. For this class, it is "BounceBackFullwayMoving".
+        implementationStep : str
+            The step in the lattice Boltzmann method algorithm at which the boundary condition is applied. For this class,
+            it is "PostCollision".
+        isDynamic : bool
+            Whether the boundary condition is dynamic (changes over time). For this class, it is True.
+        update_function : function
+            A function that updates the boundary condition. For this class, it is a function that updates the boundary
+            condition based on the current time step. The signature of the function is `update_function(time) -> (indices, vel)`,
+
+    """
+    def __init__(self, grid_info, precision_policy, update_function=None):
+        # We get the indices at time zero to pass to the parent class for initialization
+        indices, _ = update_function(0)
+        super().__init__(indices, grid_info, precision_policy)
+        self.name = "BounceBackFullwayMoving"
+        self.implementation_step = "post_collision"
+        self.is_dynamic = True
+        self.update_function = jit(update_function)
+
+    @partial(jit, static_argnums=(0,))
+    def apply(self, fout, fin, time):
+        """
+        Applies the moving bounce-back boundary condition.
+
+        Parameters:
+            fout : jax.numpy.ndarray
+                The output distribution functions.
+            fin : jax.numpy.ndarray
+                The input distribution functions.
+            time : int
+                The current time step.
+
+        Returns:
+            jax.numpy.ndarray
+                The modified output distribution functions after applying the boundary condition.
+        """
+        indices, vel = self.update_function(time)
+        c = jnp.array(self.lattice.c, dtype=self.precision_policy.compute_dtype)
+        cu = 6.0 * self.lattice.w * jnp.dot(vel, c)
+        return fout.at[indices].set(fin[indices][..., self.lattice.opposite_indices] - cu)
+
+class ZouHe(BoundaryCondition):
+    """
+    Zou-He boundary condition for a lattice Boltzmann method simulation.
+
+    This class implements the Zou-He boundary condition, which is a non-equilibrium bounce-back boundary condition.
+    It can be used to set inflow and outflow boundary conditions with prescribed pressure or velocity.
+
+    Attributes:
+    name : str
+        The name of the boundary condition. For this class, it is "ZouHe".
+    implementationStep : str
+        The step in the lattice Boltzmann method algorithm at which the boundary condition is applied. For this class,
+        it is "PostStreaming".
+    type : str
+        The type of the boundary condition. It can be either 'velocity' for a prescribed velocity boundary condition,
+        or 'pressure' for a prescribed pressure boundary condition.
+    prescribed : float or array-like
+        The prescribed values for the boundary condition. It can be either the prescribed velocities for a 'velocity'
+        boundary condition, or the prescribed pressures for a 'pressure' boundary condition.
+
+    References:
+    Zou, Q., & He, X. (1997). On pressure and velocity boundary conditions for the lattice Boltzmann BGK model.
+    Physics of Fluids, 9(6), 1591-1598. doi:10.1063/1.869307
+    """
+    def __init__(self, indices, gridInfo, precision_policy, type, prescribed):
+        super().__init__(indices, gridInfo, precision_policy)
+        self.name = "ZouHe"
+        self.implementation_step = "post_streaming"
+        self.type = type
+        self.prescribed = prescribed
+        self.needs_extra_configuration = True
+
+    def configure(self, boundaryMask):
+        """
+        Correct boundary indices to ensure that only voxelized surfaces with normal vectors along main cartesian axes
+        are assigned this type of BC.
+        """
+        nv = np.dot(self.lattice.c, ~boundaryMask.T)
+        corner_voxels = np.count_nonzero(nv, axis=0) > 1
+        # removed_voxels = np.array(self.indices)[:, corner_voxels]
+        self.indices = tuple(np.array(self.indices)[:, ~corner_voxels])
+        self.prescribed = self.prescribed[~corner_voxels]
+        return
+
+    @partial(jit, static_argnums=(0,), inline=True)
+    def calculate_vel(self, fpop, rho):
+        """
+        Calculate velocity based on the prescribed pressure/density (Zou/He BC)
+        """
+        unormal = -1. + 1. / rho * (jnp.sum(fpop[self.indices] * self.imiddleMask, axis=1, keepdims=True) +
+                               2. * jnp.sum(fpop[self.indices] * self.iknownMask, axis=1, keepdims=True))
+
+        # Return the above unormal as a normal vector which sets the tangential velocities to zero
+        vel = unormal * self.normals
+        return vel
+
+    @partial(jit, static_argnums=(0,), inline=True)
+    def calculate_rho(self, fpop, vel):
+        """
+        Calculate density based on the prescribed velocity (Zou/He BC)
+        """
+        unormal = np.sum(self.normals*vel, axis=1)
+
+        rho = (1.0/(1.0 + unormal))[..., None] * (jnp.sum(fpop[self.indices] * self.imiddleMask, axis=1, keepdims=True) +
+                                  2.*jnp.sum(fpop[self.indices] * self.iknownMask, axis=1, keepdims=True))
+        return rho
+
+    @partial(jit, static_argnums=(0,), inline=True)
+    def calculate_equilibrium(self, fpop):
+        """
+        This is the ZouHe method of calculating the missing macroscopic variables at the boundary.
+        """
+        if self.type == 'velocity':
+            vel = self.prescribed
+            rho = self.calculate_rho(fpop, vel)
+        elif self.type == 'pressure':
+            rho = self.prescribed
+            vel = self.calculate_vel(fpop, rho)
+        else:
+            raise ValueError(f"type = {self.type} not supported! Use \'pressure\' or \'velocity\'.")
+
+        # compute feq at the boundary
+        feq = self.equilibrium(rho, vel)
+        return feq
+
+    @partial(jit, static_argnums=(0,), inline=True)
+    def bounceback_nonequilibrium(self, fpop, feq):
+        """
+        Calculate unknown populations using bounce-back of non-equilibrium populations
+        a la original Zou & He formulation
+        """
+        nbd = len(self.indices[0])
+        bindex = np.arange(nbd)[:, None]
+        fbd = fpop[self.indices]
+        fknown = fpop[self.indices][bindex, self.iknown] + feq[bindex, self.imissing] - feq[bindex, self.iknown]
+        fbd = fbd.at[bindex, self.imissing].set(fknown)
+        return fbd
+
+    @partial(jit, static_argnums=(0,))
+    def apply(self, fout, _):
+        """
+        Applies the Zou-He boundary condition.
+
+        Parameters:
+            fout : jax.numpy.ndarray
+                The output distribution functions.
+            _ : jax.numpy.ndarray
+                The input distribution functions. This is not used in this method.
+
+        Returns:
+            jax.numpy.ndarray
+                The modified output distribution functions after applying the boundary condition.
+
+        NOTES:
+        This method applies the Zou-He boundary condition by first computing the equilibrium distribution functions based
+        on the prescribed values and the type of boundary condition, and then setting the unknown distribution functions
+        based on the non-equilibrium bounce-back method. 
+        Tangential velocity is not ensured to be zero by adding transverse contributions based on
+        Hecth & Harting (2010) (doi:10.1088/1742-5468/2010/01/P01018) as it caused numerical instabilities at higher
+        Reynolds numbers. One needs to use "Regularized" BC at higher Reynolds.
+        """
+        # compute the equilibrium based on prescribed values and the type of BC
+        feq = self.calculate_equilibrium(fout)
+
+        # set the unknown f populations based on the non-equilibrium bounce-back method
+        fbd = self.bounceback_nonequilibrium(fout, feq)
+        return fbd
+
+class Regularized(ZouHe):
+    """
+    Regularized boundary condition for a lattice Boltzmann method simulation.
+
+    This class implements the regularized boundary condition, which is a non-equilibrium bounce-back boundary condition
+    with additional regularization. It can be used to set inflow and outflow boundary conditions with prescribed pressure
+    or velocity.
+
+    Attributes:
+        name : str
+            The name of the boundary condition. For this class, it is "Regularized".
+        Qi : numpy.ndarray
+            The Qi tensor, which is used in the regularization of the distribution functions.
+
+    References:
+        Latt, J. (2007). Hydrodynamic limit of lattice Boltzmann equations. PhD thesis, University of Geneva.
+        Latt, J., Chopard, B., Malaspinas, O., Deville, M., & Michler, A. (2008). Straight velocity boundaries in the
+        lattice Boltzmann method. Physical Review E, 77(5), 056703. doi:10.1103/PhysRevE.77.056703
+    """
+
+    def __init__(self, indices, grid_info, precision_policy, type, prescribed):
+        super().__init__(indices, grid_info, precision_policy, type, prescribed)
+        self.name = "Regularized"
+        #TODO for Hesam: check to understand why corner cases cause instability here.
+        # self.needsExtraConfiguration = False
+        self.construct_symmetric_lattice_moment()
+
+    def construct_symmetric_lattice_moment(self):
+        """
+        Construct the symmetric lattice moment Qi.
+
+        The Qi tensor is used in the regularization of the distribution functions. It is defined as Qi = cc - cs^2*I,
+        where cc is the tensor of lattice velocities, cs is the speed of sound, and I is the identity tensor.
+        """
+        Qi = self.lattice.cc
+        if self.dim == 3:
+            diagonal = (0, 3, 5)
+            offdiagonal = (1, 2, 4)
+        elif self.dim == 2:
+            diagonal = (0, 2)
+            offdiagonal = (1,)
+        else:
+            raise ValueError(f"dim = {self.dim} not supported")
+
+        # Qi = cc - cs^2*I
+        Qi = Qi.at[:, diagonal].set(self.lattice.ee[:, diagonal] - 1./3.)
+
+        # multiply off-diagonal elements by 2 because the Q tensor is symmetric
+        Qi = Qi.at[:, offdiagonal].set(self.lattice.ee[:, offdiagonal] * 2.0)
+
+        self.Qi = Qi.T
+        return
+
+    @partial(jit, static_argnums=(0,), inline=True)
+    def regularize_fpop(self, fpop, feq):
+        """
+        Regularizes the distribution functions by adding non-equilibrium contributions based on second moments of fpop.
+
+        Parameters:
+            fpop : jax.numpy.ndarray
+                The distribution functions.
+            feq : jax.numpy.ndarray
+                The equilibrium distribution functions.
+
+        Returns:
+            jax.numpy.ndarray
+                The regularized distribution functions.
+        """
+
+        # Compute momentum flux of off-equilibrium populations for regularization: Pi^1 = Pi^{neq}
+        f_neq = fpop - feq
+        PiNeq = self.momentum_flux(f_neq)
+        # PiNeq = self.momentum_flux(fpop) - self.momentum_flux(feq)
+
+        # Compute double dot product Qi:Pi1
+        # QiPi1 = np.zeros_like(fpop)
+        # Pi1 = PiNeq
+        # QiPi1 = jnp.dot(Qi, Pi1)
+        QiPi1 = jnp.dot(PiNeq, self.Qi)
+
+        # assign all populations based on eq 45 of Latt et al (2008)
+        # fneq ~ f^1
+        fpop1 = 9. / 2. * self.lattice.w[None, :] * QiPi1
+        fpop_regularized = feq + fpop1
+
+        return fpop_regularized
+
+    @partial(jit, static_argnums=(0,))
+    def apply(self, fout, _):
+        """
+        Applies the regularized boundary condition.
+
+        Parameters:
+            fout : jax.numpy.ndarray
+                The output distribution functions.
+            _ : jax.numpy.ndarray
+                The input distribution functions. This is not used in this method.
+
+        Returns:
+            jax.numpy.ndarray
+                The modified output distribution functions after applying the boundary condition.
+
+        Notes:
+        This method applies the regularized boundary condition by first computing the equilibrium distribution functions based
+        on the prescribed values and the type of boundary condition, then setting the unknown distribution functions
+        based on the non-equilibrium bounce-back method, and finally regularizing the distribution functions.
+        """
+
+        # compute the equilibrium based on prescribed values and the type of BC
+        feq = self.calculate_equilibrium(fout)
+
+        # set the unknown f populations based on the non-equilibrium bounce-back method
+        fbd = self.bounceback_nonequilibrium(fout, feq)
+
+        # Regularize the boundary fpop
+        fbd = self.regularize_fpop(fbd, feq)
+        return fbd
+

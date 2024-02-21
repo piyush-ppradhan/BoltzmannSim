@@ -23,8 +23,8 @@ from jax.experimental.shard_map import shard_map
 from jax.experimental.multihost_utils import process_allgather
 
 # Locally defined functions import
-from lattice import *
-from utilities import downsample_field
+from src.lattice import *
+from src.utilities import downsample_field
 
 class LBMBase(object):
     """

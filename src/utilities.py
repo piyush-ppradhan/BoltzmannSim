@@ -5,7 +5,7 @@ from functools import partial
 import __main__
 
 # Custom libraries
-from conversion_parameters import *
+from src.conversion_parameters import *
 
 # Third-party libraries
 import matplotlib.pyplot as plt
@@ -20,7 +20,7 @@ import jax.numpy as jnp
 from jax.image import resize
 from jax import jit
 
-def read_raw_file(filename,width,height,depth=0,data_type=np.uint8):
+def read_raw_file(filename, width, height, depth=0, data_type=np.uint8):
   """
   Read the given raw file and store it in a numpy array.
 
@@ -132,7 +132,7 @@ def write_vtk(output_dir, prefix, time_step, fields, conv_param):
   for key, val in fields.items():
     if key == "rho":
        grid[key] = conv_param.to_physical_units(val.flatten(order='F'), "density")
-    elif key == "ux" or key == "uy" or key == "uz":
+    elif key in ["ux", "uy", "uz", "u_x", "u_y", "u_z", "vel_x", "vel_y", "vel_z"]:
        grid[key] = conv_param.to_physical_units(val.flatten(order='F'), "velocity")
   
   filename = os.path.join(output_dir, prefix+"_"+f"{time_step:07}.vtk")

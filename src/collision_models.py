@@ -1,7 +1,7 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
-from base import *
+from src.base import *
 
 class BGK(LBMBase):
     """
