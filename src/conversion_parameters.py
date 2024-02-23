@@ -42,6 +42,10 @@ class ConversionParameters(object):
                 return x * self.C_rho
             case "force":
                 return x * (self.C_rho * (self.C_l**4) * (self.C_t**0.5))
+            case "gas_constant":
+                return x * (self.C_rho * (self.C_l**4) * self.C_t**(-2) * self.C_T)
+            case "temperature":
+                return x * self.C_T
             case _:
                 raise ValueError("Invalid type " + ttype)
 
@@ -67,6 +71,10 @@ class ConversionParameters(object):
                 return x / self.C_rho
             case "force":
                 return x / (self.C_rho * (self.C_l**4) * (self.C_t**0.5))
+            case "gas_constant":
+                return x / (self.C_rho * (self.C_l**4) * self.C_t**(-2) * self.C_T)
+            case "temperature":
+                return x / self.C_T
             case _:
                 raise ValueError("Invalid type " + ttype)
 
@@ -79,6 +87,7 @@ class NoConversion(ConversionParameters):
         self.C_l = 1.0
         self.C_rho = 1.0
         self.C_t = 1.0
+        self.C_T = 1.0
             
 class ReConversion(ConversionParameters):
     def __init__(self):

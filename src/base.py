@@ -13,7 +13,7 @@ import jax
 import jmp # Set precision policy for the input and output
 import orbax.checkpoint as orb # For storing and restoring checkpoints
 import jmp # Mixed precision library for JAX
- 
+
 # JAX-specific imports
 import jax.numpy as jnp
 from jax import jit, lax, vmap, config
@@ -93,7 +93,7 @@ class LBMBase(object):
         self.restore_checkpoint = kwargs.get("restore_checkpoint", False)
         self.write_start = kwargs.get("write_start")
         self.write_control = kwargs.get("write_control")
-        self.output_dir = kwargs.get("output_dir") 
+        self.output_dir = kwargs.get("output_dir")
         self.print_info_rate = kwargs.get("print_info_rate", 1)
         self.downsampling_factor = kwargs.get("downsampling_factor", 1)
         self.return_post_col_dist = kwargs.get("return_post_col_dist", False)
@@ -110,9 +110,9 @@ class LBMBase(object):
         if self.compute_precision == jnp.float64:
             config.update("jax_enable_x64", True)
             print(colored("Using 64-bit precision for computation.\n", 'yellow'))
-            
+
         self.precision_policy = jmp.Policy(compute_dtype=self._compute_precision, param_dtype=self.compute_precision, output_dtype=self.write_precision)
-            
+
         #Set the checkpoint manager
         if self.checkpoint_rate > 0:
             mngr_options = orb.CheckpointManagerOptions(save_interval_steps=self.checkpoint_rate, max_to_keep=1)
@@ -130,7 +130,7 @@ class LBMBase(object):
             self.nx = nx + (self.n_devices - nx % self.n_devices)
 
         self.show_simulation_parameters()
-        
+
         self.grid_info = {
             'nx': self.nx,
             'ny': self.ny,
@@ -151,14 +151,14 @@ class LBMBase(object):
             self.mesh = Mesh(self.devices, axis_names=("x", "y", "name"))
             self.sharding = NamedSharding(self.mesh, P("x", "y", "name"))
 
-            self.streaming = jit(shard_map(self.streaming_m, mesh = self.mesh, 
+            self.streaming = jit(shard_map(self.streaming_m, mesh = self.mesh,
                                             in_specs = P("x", None, None), out_specs = P("x", None, None),
                                             check_rep = False))
         elif self.d == 3:
             self.devices = mesh_utils.create_device_mesh((self.n_devices,1,1))
             self.sharding = NamedSharding(self.mesh, P("x", "y", "z", "name"))
 
-            self.streaming = jit(shard_map(self.streaming_m, mesh = self.mesh, 
+            self.streaming = jit(shard_map(self.streaming_m, mesh = self.mesh,
                                             in_specs = P("x", None, None, None), out_specs = P("x", None, None, None),
                                             check_rep = False))
         else:
@@ -191,7 +191,7 @@ class LBMBase(object):
         if not isinstance(value, int):
             raise ValueError("nx must be integer")
         self._nx = value
-        
+
     @property
     def ny(self):
         return self._ny
@@ -277,7 +277,7 @@ class LBMBase(object):
         if not isinstance(value,int):
             raise ValueError("Total timesteps must be an integer")
         self._total_timesteps = value
-        
+
     @property
     def checkpoint_rate(self):
         return self._checkpoint_rate
@@ -361,11 +361,11 @@ class LBMBase(object):
         if not isinstance(value,bool):
             raise ValueError("compute_mlups must be a boolean")
         self._compute_mlups = value
-        
+
     @property
     def print_info_rate(self):
         return self._print_info_rate
-    
+
     @print_info_rate.setter
     def print_info_rate(self, value):
         if value is None:
@@ -383,7 +383,7 @@ class LBMBase(object):
         if not isinstance(value, int):
             raise TypeError("n_devices must be an integer")
         self._n_devices = value
-        
+
     def set_precision(self, precision_str):
         return {
             "f16": jnp.float16,
@@ -393,9 +393,9 @@ class LBMBase(object):
 
     def show_simulation_parameters(self):
         attributes_to_show = [
-            'omega', 'nx', 'ny', 'nz', 'd', 'lattice', 'compute_precision', 'write_precision', 
-            'total_timesteps', 'conv_param', 'checkpoint_rate', 'checkpoint_dir', 
-            'restore_checkpoint', 'write_start', 'write_control', 'output_dir', 
+            'omega', 'nx', 'ny', 'nz', 'd', 'lattice', 'compute_precision', 'write_precision',
+            'total_timesteps', 'conv_param', 'checkpoint_rate', 'checkpoint_dir',
+            'restore_checkpoint', 'write_start', 'write_control', 'output_dir',
             'compute_mlups', 'downsampling_factor', 'n_devices', 'backend'
         ]
 
@@ -421,12 +421,12 @@ class LBMBase(object):
             'backend': 'Backend'
         }
         simulation_name = self.__class__.__name__
-        
+
         print(colored(f'**** Simulation Parameters for {simulation_name} ****', 'green'))
         header = f"{colored('Parameter', 'blue'):>30} | {colored('Value', 'yellow')}"
         print(header)
         print('-' * 50)
-        
+
         for attr in attributes_to_show:
             value = getattr(self, attr, 'Attribute not set')
             descriptive_name = descriptive_names.get(attr, attr)  # Use the attribute name as a fallback
@@ -438,7 +438,7 @@ class LBMBase(object):
         Creates the data necessary for applying boundary conditions:
             1. Computing grid_mask
             2. Computing local mask and normal arrays
-        
+
         Arguments:
             None
         """
@@ -479,32 +479,32 @@ class LBMBase(object):
             sharding = self.sharding
         x = jnp.full(shape=shape, fill_value=init_val, dtype=ttype)
         return jax.lax.with_sharding_constraint(x, sharding)
-    
+
     def initialize_macroscopic_fields(self):
         """
         Functions to initialize the density and velocity arrays with their corresponding initial values.
         By default, velocities are 0 everywhere and density is 1.0 everywhere.
-        
+
         Note: Function must be overwritten in a subclass or instance of the class.
-        
+
         Arguments:
             None by default, can be overwritten as required
-        
+
         Returns:
-            None, None: The default density and velocity values, both None. 
+            None, None: The default density and velocity values, both None.
             This indicates that the actual values should be set elsewhere.
         """
         print("Default initial conditions assumed: density = 1.0 and velocity = 0.0")
         print("To set explicit initial values for velocity and density, use the self.initialize_macroscopic_fields function")
         return None, None
-    
+
     def assign_fields_sharded(self):
         """
-        This function is used to initialize the distribution array using the initial velocities and velocity defined in self.initialize_macroscopic_fields function. 
+        This function is used to initialize the distribution array using the initial velocities and velocity defined in self.initialize_macroscopic_fields function.
         To do this, function first uses the initialize_macroscopic_fields function to get the initial values of rho (rho0) and velocity (u0).
-    
+
         The distribution is initialized with rho0 and u0 values, using the self.equilibrium function.
-        
+
         Arguments:
             None
 
@@ -518,7 +518,7 @@ class LBMBase(object):
         else:
             f = self.initialize_distribution(rho0, u0)
         return f
-    
+
     def initialize_distribution(self, rho0, u0):
         """
         This function is used to initialize the distribution array for the simulation.
@@ -547,14 +547,14 @@ class LBMBase(object):
             None
         """
         hw_x = self.n_devices
-        hw_y = hw_z = 1 
+        hw_y = hw_z = 1
         if self.d == 2:
             grid_mask = self.distributed_array_init((self.nx + 2 * hw_x, self.ny + 2 * hw_y, self.lattice.q), jnp.bool_, init_val=True)
             grid_mask = grid_mask.at[(slice(hw_x, -hw_x), slice(hw_y, -hw_y), slice(None))].set(False)
             if solid_halo_voxels is not None:
                 solid_halo_voxels = solid_halo_voxels.at[:, 0].add(hw_x)
                 solid_halo_voxels = solid_halo_voxels.at[:, 1].add(hw_y)
-                grid_mask = grid_mask.at[tuple(solid_halo_voxels.T)].set(True)  
+                grid_mask = grid_mask.at[tuple(solid_halo_voxels.T)].set(True)
 
             grid_mask = self.streaming(grid_mask)
             return lax.with_sharding_constraint(grid_mask, self.sharding)
@@ -569,7 +569,7 @@ class LBMBase(object):
                 grid_mask = grid_mask.at[tuple(solid_halo_voxels.T)].set(True)
             grid_mask = self.streaming(grid_mask)
             return lax.with_sharding_constraint(grid_mask, self.sharding)
-        
+
     def bounding_box_indices_(self):
         """
         This function calculates the indices of the bounding box of a 2D or 3D grid.
@@ -602,8 +602,8 @@ class LBMBase(object):
                 "right": np.array([[self.nx - 1, j, k] for j in range(self.ny) for k in range(self.nz)], dtype=int),
                 "front": np.array([[i, 0, k] for i in range(self.nx) for k in range(self.nz)], dtype=int),
                 "back": np.array([[i, self.ny - 1, k] for i in range(self.nx) for k in range(self.nz)], dtype=int)}
-            return bounding_box 
-    
+            return bounding_box
+
     def send_right(self, x, axis_name):
         """
         This function sends the data to the right neighboring process in a parallel computing environment.
@@ -622,7 +622,7 @@ class LBMBase(object):
             The data after being sent to the right neighboring process.
         """
         return lax.ppermute(x, perm=self.right_perm, axis_name=axis_name)
-   
+
     def send_left(self, x, axis_name):
         """
         This function sends the data to the left neighboring process in a parallel computing environment.
@@ -640,12 +640,12 @@ class LBMBase(object):
             The data after being sent to the left neighboring process.
         """
         return lax.ppermute(x, perm=self.left_perm, axis_name=axis_name)
-    
+
     @partial(jit, static_argnums=(0,), donate_argnums=(1,))
     def streaming_p(self,fin):
         """
         Perform streaming operation on a partitioned (in the x-direction) distribution function
-        
+
         Arguments:
             f: jax.ndarray
                 Distribution function which is defined over multiple devices.
@@ -660,14 +660,14 @@ class LBMBase(object):
             elif self.d == 3:
                 return jnp.roll(f,(e[0], e[1], e[2]),axis=(0, 1, 2))
         return vmap(streaming_i, in_axes=(-1,0), out_axes=-1)(fin, self.e.T)
-    
+
     def streaming_m(self, f):
         """
         This function will communicate the respective streamed distribution from other neighbouring array shards.
         To the current shard.
-        
+
         (left_halo, right_indices)| device |(right_halo, left_indices)
-        
+
         Arguments:
             f: jax.ndarray
                 Sharded array storing the distribution function
@@ -679,18 +679,18 @@ class LBMBase(object):
         f = f.at[:1, ..., self.lattice.right_indices].set(left_comm)
         f = f.at[-1:, ..., self.lattice.left_indices].set(right_comm)
         return f
-            
+
     def compute_macroscopic_variables(self, f):
         """
         Compute the macroscopic variables density (rho) and velocity (u) using the distributions.
 
         Arguments:
             f: jax.numpy.ndarray
-                Distribution array, storing distribution for all lattice nodes for all directions. 
+                Distribution array, storing distribution for all lattice nodes for all directions.
 
         Returns:
             rho: jax.numpy.ndarray
-                Density at each lattice nodes. 
+                Density at each lattice nodes.
             u: jax.numpy.ndarray
                 Velocity at each lattice nodes.
         """
@@ -698,14 +698,14 @@ class LBMBase(object):
         e = jnp.array(self.e, dtype=self.precision_policy.compute_dtype).T
         u = jnp.dot(f, e) / rho
         return rho, u
-    
+
     @partial(jit, static_argnums=(0,))
     def momentum_flux(self, fneq):
         """
-        This function computes the momentum flux, which is the product of the non-equilibrium 
+        This function computes the momentum flux, which is the product of the non-equilibrium
         distribution functions (fneq) and the lattice moments (cc).
 
-        The momentum flux is used in the computation of the stress tensor in the Lattice Boltzmann 
+        The momentum flux is used in the computation of the stress tensor in the Lattice Boltzmann
         Method (LBM).
 
         Parameters:
@@ -717,7 +717,7 @@ class LBMBase(object):
                 The computed momentum flux.
         """
         return jnp.dot(fneq, self.lattice.ee)
-    
+
     @partial(jit, static_argnums=(0,3))
     def equilibrium(self, rho, u, cast_output=True):
         """
@@ -727,7 +727,7 @@ class LBMBase(object):
             rho: jax.numpy.ndarray
                 Density values.
             u: jax.numpy.ndarray
-                Velocity values. 
+                Velocity values.
             cast_output: bool {Optional}
                 A flag to cast the density and velocity values to the compute and output precision. Default: True
 
@@ -742,7 +742,7 @@ class LBMBase(object):
         udote = jnp.dot(u, e)
         udotu = jnp.sum(jnp.square(u), axis=-1, keepdims=True)
         feq = rho * self.w * (1.0 + udote*(3.0 + 4.5*udote) - 1.5*udotu)
-        
+
         if cast_output:
             return self.precision_policy.cast_to_output(feq)
         else:
@@ -760,7 +760,7 @@ class LBMBase(object):
                 Density at all the lattice nodes.
             u: Array-like
                 Velocity at all the lattice nodes.
-        
+
         Returns:
             fout: Array-like
                 Distribution function.
@@ -778,11 +778,11 @@ class LBMBase(object):
             fin: Array-like
                 Input distribution function.
             timestep: int
-                Timestep to be used for applying the boundary condition. 
+                Timestep to be used for applying the boundary condition.
                 Useful for dynamic boundary conditions, such as moving wall boundary condition.
             implementation_step: str
                 The implementation step is matched for boundary condition for all the lattice points.
-        
+
         Returns:
             fout: Array-like
                 Output distribution values at lattice nodes.
@@ -809,7 +809,7 @@ class LBMBase(object):
 
         Arguments:
             t_total: float
-                Total time elapsed for computing all the steps in the simulation. 
+                Total time elapsed for computing all the steps in the simulation.
 
         Returns:
             mlups: float
@@ -817,10 +817,10 @@ class LBMBase(object):
         """
         if self.lattice.d == 2:
             mlups = (self.nx * self.ny * self.total_timesteps) / (t_total * 1e6)
-        else: 
+        else:
             mlups = (self.nx * self.ny * self.nz * self.total_timesteps) / (t_total * 1e6)
         return mlups
-    
+
     @partial(jit, static_argnums=(0,), donate_argnums=(1,))
     def step(self, f_poststreaming, timestep):
         """
@@ -863,10 +863,10 @@ class LBMBase(object):
         """
         This function runs the LBM simulation for a specified number of time steps.
 
-        It first initializes the distribution functions and then enters a loop where it performs the 
+        It first initializes the distribution functions and then enters a loop where it performs the
         simulation steps (collision, streaming, and boundary conditions) for each time step.
 
-        The function can also print the progress of the simulation, save the simulation data, and 
+        The function can also print the progress of the simulation, save the simulation data, and
         compute the performance of the simulation in million lattice updates per second (MLUPS).
 
         Parameters:
@@ -891,7 +891,7 @@ class LBMBase(object):
                     print(f"Restored checkpoint at step {latest_step}.")
                 except ValueError:
                     raise ValueError(f"Failed to restore checkpoint at step {latest_step}.")
-                
+
                 start_step = latest_step + 1
                 if not (self.total_timesteps > start_step):
                     raise ValueError(f"Simulation already exceeded maximum allowable steps (self.total_timesteps = {self.total_timesteps}). Consider increasing self.total_timesteps.")
@@ -927,20 +927,20 @@ class LBMBase(object):
                 rho, u = self.compute_macroscopic_variables(f)
                 rho = downsample_field(rho, self.downsampling_factor)
                 u = downsample_field(u, self.downsampling_factor)
-                
+
                 # Gather the data from all processes and convert it to numpy arrays (move to host memory)
                 rho = process_allgather(rho)
                 u = process_allgather(u)
 
                 # Save the data
                 self.handle_io_timestep(timestep, f, fstar, rho, u, rho_prev, u_prev)
-            
+
             if checkpoint_flag:
                 # Save the checkpoint
                 print(f"Saving checkpoint at timestep {timestep}/{self.total_timesteps}")
                 state = {'f': f}
                 self.mngr.save(timestep, state)
-            
+
             # Start the timer for the MLUPS computation after the first timestep (to remove compilation overhead)
             if self.compute_mlups and timestep == 1:
                 jax.block_until_ready(f)
@@ -961,12 +961,12 @@ class LBMBase(object):
                 print(colored("MLUPS: ", 'blue') + colored(f"{self.nx * self.ny * self.nz * self.total_timesteps / (end - start) / 1e6}", 'red'))
 
         return f
-    
+
     def handle_io_timestep(self, timestep, f, fstar, rho, u, rho_prev, u_prev):
         """
         This function handles the input/output (I/O) operations at each time step of the simulation.
 
-        It prepares the data to be saved and calls the output_data function, which can be overwritten 
+        It prepares the data to be saved and calls the output_data function, which can be overwritten
         by the user to customize the I/O operations.
 
         Parameters:
@@ -994,15 +994,15 @@ class LBMBase(object):
 
     def output_data(self, **kwargs):
         """
-        This function is intended to be overwritten by the user to customize the input/output (I/O) 
+        This function is intended to be overwritten by the user to customize the input/output (I/O)
         operations of the simulation.
 
-        By default, it does nothing. When overwritten, it could save the simulation data to files, 
+        By default, it does nothing. When overwritten, it could save the simulation data to files,
         display the simulation results in real time, send the data to another process for analysis, etc.
 
         Parameters:
             **kwargs: dict
-                A dictionary containing the simulation data to be outputted. The keys are the names of the 
+                A dictionary containing the simulation data to be outputted. The keys are the names of the
                 data fields, and the values are the data fields themselves.
         """
         pass
@@ -1011,10 +1011,10 @@ class LBMBase(object):
         """
         This function sets the boundary conditions for the simulation.
 
-        It is intended to be overwritten by the user to specify the boundary conditions according to 
+        It is intended to be overwritten by the user to specify the boundary conditions according to
         the specific problem being solved.
 
-        By default, it does nothing. When overwritten, it could set periodic boundaries, no-slip 
+        By default, it does nothing. When overwritten, it could set periodic boundaries, no-slip
         boundaries, inflow/outflow boundaries, etc.
         """
         pass
@@ -1023,10 +1023,10 @@ class LBMBase(object):
         """
         This function computes the force to be applied to the fluid in the Lattice Boltzmann Method.
 
-        It is intended to be overwritten by the user to specify the force according to the specific 
+        It is intended to be overwritten by the user to specify the force according to the specific
         problem being solved.
 
-        By default, it does nothing and returns None. When overwritten, it could implement a constant 
+        By default, it does nothing and returns None. When overwritten, it could implement a constant
         force term.
 
         Returns:
@@ -1055,7 +1055,7 @@ class LBMBase(object):
         Returns:
             f_postcollision: jax.numpy.ndarray
                 The post-collision distribution functions with the force applied.
-        
+
         References:
             Kupershtokh, A. (2004). New method of incorporating a body force term into the lattice Boltzmann equation. In
             Proceedings of the 5th International EHD Workshop (pp. 241-246). University of Poitiers, Poitiers, France.

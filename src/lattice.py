@@ -211,6 +211,7 @@ class D2Q9(Lattice):
         """
         self.c_s = 1.0 / (3.0 ** 0.5)
         self.c_s2 = 1.0 / 3.0
+        self.c0 = 6.0
 
 class D3Q19(Lattice):
     """
@@ -238,6 +239,7 @@ class D3Q19(Lattice):
         """
         self.c_s = 1.0 / (3.0 ** 0.5)
         self.c_s2 = 1.0 / 3.0
+        self.c0 = 6.0
 
 class D3Q27(Lattice):
     """
