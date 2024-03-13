@@ -19,7 +19,10 @@ class ConversionParameters(object):
             The name of attributes contained sub-classes stored as strings.
     """
     def __init__(self):
-        pass
+        self.C_l = 1.0
+        self.C_rho = 1.0
+        self.C_t = 1.0
+        self.C_T = 1.0
 
     def to_physical_units(self, x, ttype):
         """
@@ -38,12 +41,14 @@ class ConversionParameters(object):
         match ttype:
             case "velocity":
                 return x * (self.C_l / self.C_t)
+            case "pressure":
+                return x * (self.C_rho * self.C_l**2 * self.C_t**(-2))
             case "density":
                 return x * self.C_rho
             case "force":
                 return x * (self.C_rho * (self.C_l**4) * (self.C_t**0.5))
             case "gas_constant":
-                return x * (self.C_rho * (self.C_l**4) * self.C_t**(-2) * self.C_T)
+                return x * (self.C_rho * (self.C_l**4) * self.C_T) / self.C_t**2
             case "temperature":
                 return x * self.C_T
             case _:
@@ -66,13 +71,15 @@ class ConversionParameters(object):
         """
         match ttype:
             case "velocity":
-                return x * (self.C_t / self.C_l)
+                return x / (self.C_l / self.C_t)
+            case "pressure":
+                return x / (self.C_rho * self.C_l**2 * self.C_t**(-2))
             case "density":
                 return x / self.C_rho
             case "force":
                 return x / (self.C_rho * (self.C_l**4) * (self.C_t**0.5))
             case "gas_constant":
-                return x / (self.C_rho * (self.C_l**4) * self.C_t**(-2) * self.C_T)
+                return x * self.C_t**2 / (self.C_rho * (self.C_l**4) * self.C_T)
             case "temperature":
                 return x / self.C_T
             case _:
@@ -84,10 +91,7 @@ class ConversionParameters(object):
 
 class NoConversion(ConversionParameters):
     def __init__(self):
-        self.C_l = 1.0
-        self.C_rho = 1.0
-        self.C_t = 1.0
-        self.C_T = 1.0
+        super().__init__()
             
 class ReConversion(ConversionParameters):
     def __init__(self):

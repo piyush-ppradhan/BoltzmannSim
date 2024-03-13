@@ -4,15 +4,14 @@ Definition of LBMBase class for defining and running a problem
 
 # Standard libraries
 import time
+from functools import partial  # Function modifier for identifying the static and traced variables
 
 # Third-party imports
-from functools import partial # Function modifier for identifying the static and traced variables
 import numpy as np
-from termcolor import colored # Colored output to the terminal
+from termcolor import colored  # Colored output to the terminal
 import jax
-import jmp # Set precision policy for the input and output
-import orbax.checkpoint as orb # For storing and restoring checkpoints
-import jmp # Mixed precision library for JAX
+import orbax.checkpoint as orb  # For storing and restoring checkpoints
+import jmp  # Mixed precision library for JAX
 
 # JAX-specific imports
 import jax.numpy as jnp
@@ -25,6 +24,7 @@ from jax.experimental.multihost_utils import process_allgather
 # Locally defined functions import
 from src.lattice import *
 from src.utilities import downsample_field
+
 
 class LBMBase(object):
     """
@@ -49,8 +49,6 @@ class LBMBase(object):
             Mask that identifies all the solid nodes in the grid. Solid node: 0, Fluid node: 1
         boundary_conditions: BoundaryCondition
             Boundary conditions used in the problem, defined as a list of objects of class BoundaryCondition. Default: Empty i.e., no boundary conditions
-        conv_param: ConversionParameter
-            Conversion parameters to convert between Lattice Units and SI units.
         create_log: bool
             Log file is saved in current directory, it will overwrite the preci
         output_dir: str
@@ -76,17 +74,18 @@ class LBMBase(object):
         return_post_col_dist: bool {Optional}
             Return the post collision distribution values. Default: False
     """
+
     def __init__(self, **kwargs):
         self.omega = kwargs.get("omega")
         self.nx = kwargs.get("nx")
         self.ny = kwargs.get("ny")
-        self.nz = kwargs.get("nz",0)
+        self.nz = kwargs.get("nz", 0)
         self.lattice = kwargs.get("lattice")
+        self.force = kwargs.get("force", 0.0)
         self.compute_precision = self.set_precision(self.lattice.precision)
         self.write_precision = self.set_precision(kwargs.get("write_precision"))
         self.solid_mask = kwargs.get("solid_mask")
         self.total_timesteps = kwargs.get("total_timesteps")
-        self.conv_param = kwargs.get("conversion_parameters")
         self.compute_mlups = kwargs.get("compute_MLUPS", False)
         self.checkpoint_rate = kwargs.get("checkpoint_rate", 0)
         self.checkpoint_dir = kwargs.get("checkpoint_dir", "./checkpoints")
@@ -106,14 +105,15 @@ class LBMBase(object):
         self.e = self.lattice.e
         self.w = self.lattice.w
 
-        #Configure JAX to use 64-bit precision if necessary
+        # Configure JAX to use 64-bit precision if necessary
         if self.compute_precision == jnp.float64:
             config.update("jax_enable_x64", True)
             print(colored("Using 64-bit precision for computation.\n", 'yellow'))
 
-        self.precision_policy = jmp.Policy(compute_dtype=self._compute_precision, param_dtype=self.compute_precision, output_dtype=self.write_precision)
+        self.precision_policy = jmp.Policy(compute_dtype=self._compute_precision, param_dtype=self.compute_precision,
+                                           output_dtype=self.write_precision)
 
-        #Set the checkpoint manager
+        # Set the checkpoint manager
         if self.checkpoint_rate > 0:
             mngr_options = orb.CheckpointManagerOptions(save_interval_steps=self.checkpoint_rate, max_to_keep=1)
             self.mngr = orb.CheckpointManager(self.checkpoint_dir, orb.PyTreeCheckpointer(), options=mngr_options)
@@ -142,29 +142,29 @@ class LBMBase(object):
         P = PartitionSpec
         # Define the left and right permutation to communicate between different GPUs.
         # The tuple for permutation is defined as (source_index, destination_index)
-        self.right_perm = [(i, (i+1) % self.n_devices) for i in range(self.n_devices)]
-        self.left_perm = [((i+1) % self.n_devices, i) for i in range(self.n_devices)]
+        self.right_perm = [(i, (i + 1) % self.n_devices) for i in range(self.n_devices)]
+        self.left_perm = [((i + 1) % self.n_devices, i) for i in range(self.n_devices)]
 
         # Setting up sharding
         if self.d == 2:
-            self.devices = mesh_utils.create_device_mesh((self.n_devices,1,1))
+            self.devices = mesh_utils.create_device_mesh((self.n_devices, 1, 1))
             self.mesh = Mesh(self.devices, axis_names=("x", "y", "name"))
             self.sharding = NamedSharding(self.mesh, P("x", "y", "name"))
 
-            self.streaming = jit(shard_map(self.streaming_m, mesh = self.mesh,
-                                            in_specs = P("x", None, None), out_specs = P("x", None, None),
-                                            check_rep = False))
+            self.streaming = jit(shard_map(self.streaming_m, mesh=self.mesh,
+                                           in_specs=P("x", None, None), out_specs=P("x", None, None),
+                                           check_rep=False))
         elif self.d == 3:
-            self.devices = mesh_utils.create_device_mesh((self.n_devices,1,1))
+            self.devices = mesh_utils.create_device_mesh((self.n_devices, 1, 1))
             self.sharding = NamedSharding(self.mesh, P("x", "y", "z", "name"))
 
-            self.streaming = jit(shard_map(self.streaming_m, mesh = self.mesh,
-                                            in_specs = P("x", None, None, None), out_specs = P("x", None, None, None),
-                                            check_rep = False))
+            self.streaming = jit(shard_map(self.streaming_m, mesh=self.mesh,
+                                           in_specs=P("x", None, None, None), out_specs=P("x", None, None, None),
+                                           check_rep=False))
         else:
             raise ValueError("Dimension of the problem must be either 2 or 3")
 
-        self.bounding_box_indices =  self.bounding_box_indices_()
+        self.bounding_box_indices = self.bounding_box_indices_()
         self._create_boundary_data()
         self.force = self.get_force()
 
@@ -176,8 +176,8 @@ class LBMBase(object):
     def omega(self, value):
         if value is None:
             raise ValueError("Omega must be provided")
-        if not isinstance(value, float):
-            raise ValueError("Omega must be float")
+        if not isinstance(value, float) and not isinstance(value, list):
+            raise ValueError("Omega must be float or list of floats")
         self._omega = value
 
     @property
@@ -274,7 +274,7 @@ class LBMBase(object):
     def total_timesteps(self, value):
         if value is None:
             raise ValueError("Total timesteps value must be provided")
-        if not isinstance(value,int):
+        if not isinstance(value, int):
             raise ValueError("Total timesteps must be an integer")
         self._total_timesteps = value
 
@@ -286,7 +286,7 @@ class LBMBase(object):
     def checkpoint_rate(self, value):
         if value is None:
             raise ValueError("checkpoint_rate must be provided")
-        if not isinstance(value,int):
+        if not isinstance(value, int):
             raise ValueError("checkpoint_rate must be an integer")
         self._checkpoint_rate = value
 
@@ -298,7 +298,7 @@ class LBMBase(object):
     def checkpoint_dir(self, value):
         if value is None:
             raise ValueError("checkpoint_dir must be provided")
-        if not isinstance(value,str):
+        if not isinstance(value, str):
             raise ValueError("checkpoint_dir must be a string")
         self._checkpoint_dir = value
 
@@ -310,7 +310,7 @@ class LBMBase(object):
     def restore_checkpoint(self, value):
         if value is None:
             raise ValueError("restore_checkpoint must be provided")
-        if not isinstance(value,bool):
+        if not isinstance(value, bool):
             raise ValueError("restore_checkpoint must be a boolean")
         self._restore_checkpoint = value
 
@@ -322,7 +322,7 @@ class LBMBase(object):
     def write_start(self, value):
         if value is None:
             raise ValueError("write_start must be provided.")
-        if not isinstance(value,int):
+        if not isinstance(value, int):
             raise ValueError("write_start must be an integer.")
         self._write_start = value
 
@@ -334,7 +334,7 @@ class LBMBase(object):
     def write_control(self, value):
         if value is None:
             raise ValueError("write_control must be provided.")
-        if not isinstance(value,int):
+        if not isinstance(value, int):
             raise ValueError("write_control must be an integer.")
         self._write_control = value
 
@@ -346,7 +346,7 @@ class LBMBase(object):
     def output_dir(self, value):
         if value is None:
             raise ValueError("output_dir must be provided")
-        if not isinstance(value,str):
+        if not isinstance(value, str):
             raise ValueError("output_dir must be a string")
         self._output_dir = value
 
@@ -358,7 +358,7 @@ class LBMBase(object):
     def compute_mlups(self, value):
         if value is None:
             raise ValueError("compute_mlups must be provided")
-        if not isinstance(value,bool):
+        if not isinstance(value, bool):
             raise ValueError("compute_mlups must be a boolean")
         self._compute_mlups = value
 
@@ -394,7 +394,7 @@ class LBMBase(object):
     def show_simulation_parameters(self):
         attributes_to_show = [
             'omega', 'nx', 'ny', 'nz', 'd', 'lattice', 'compute_precision', 'write_precision',
-            'total_timesteps', 'conv_param', 'checkpoint_rate', 'checkpoint_dir',
+            'total_timesteps', 'checkpoint_rate', 'checkpoint_dir',
             'restore_checkpoint', 'write_start', 'write_control', 'output_dir',
             'compute_mlups', 'downsampling_factor', 'n_devices', 'backend'
         ]
@@ -409,7 +409,6 @@ class LBMBase(object):
             'compute_precision': 'Precision used for computation',
             'write_precision': 'Precision used for writing the output files',
             'total_timesteps': 'Total timesteps run in the simulation',
-            'conv_param': 'Conversion parameters used to convert between the lattice and SI units',
             'checkpoint_rate': 'Rate at which files are generated',
             'checkpoint_dir': 'Directory where checkpoint files are written',
             'restore_checkpoint': 'Start simulation from a checkpoint instead of beginning',
@@ -457,7 +456,7 @@ class LBMBase(object):
             bc.create_local_mask_and_normal_arrays(grid_mask)
         print("Time to create the local masks and normal arrays:", time.time() - start)
 
-    def distributed_array_init(self, shape, ttype, init_val = 0, sharding=None):
+    def distributed_array_init(self, shape, ttype, init_val=0, sharding=None):
         """
         Generate a jax distributed with given shape, type, initial value and sharding strategy.
 
@@ -495,7 +494,8 @@ class LBMBase(object):
             This indicates that the actual values should be set elsewhere.
         """
         print("Default initial conditions assumed: density = 1.0 and velocity = 0.0")
-        print("To set explicit initial values for velocity and density, use the self.initialize_macroscopic_fields function")
+        print(
+            "To set explicit initial values for velocity and density, use the self.initialize_macroscopic_fields function")
         return None, None
 
     def assign_fields_sharded(self):
@@ -549,7 +549,8 @@ class LBMBase(object):
         hw_x = self.n_devices
         hw_y = hw_z = 1
         if self.d == 2:
-            grid_mask = self.distributed_array_init((self.nx + 2 * hw_x, self.ny + 2 * hw_y, self.lattice.q), jnp.bool_, init_val=True)
+            grid_mask = self.distributed_array_init((self.nx + 2 * hw_x, self.ny + 2 * hw_y, self.lattice.q), jnp.bool_,
+                                                    init_val=True)
             grid_mask = grid_mask.at[(slice(hw_x, -hw_x), slice(hw_y, -hw_y), slice(None))].set(False)
             if solid_halo_voxels is not None:
                 solid_halo_voxels = solid_halo_voxels.at[:, 0].add(hw_x)
@@ -560,8 +561,10 @@ class LBMBase(object):
             return lax.with_sharding_constraint(grid_mask, self.sharding)
 
         elif self.d == 3:
-            grid_mask = self.distributed_array_init((self.nx + 2 * hw_x, self.ny + 2 * hw_y, self.nz + 2 * hw_z, self.lattice.q), jnp.bool_, init_val=True)
-            grid_mask = grid_mask.at[(slice(hw_x, -hw_x), slice(hw_y, -hw_y), slice(hw_z, -hw_z), slice(None))].set(False)
+            grid_mask = self.distributed_array_init(
+                (self.nx + 2 * hw_x, self.ny + 2 * hw_y, self.nz + 2 * hw_z, self.lattice.q), jnp.bool_, init_val=True)
+            grid_mask = grid_mask.at[(slice(hw_x, -hw_x), slice(hw_y, -hw_y), slice(hw_z, -hw_z), slice(None))].set(
+                False)
             if solid_halo_voxels is not None:
                 solid_halo_voxels = solid_halo_voxels.at[:, 0].add(hw_x)
                 solid_halo_voxels = solid_halo_voxels.at[:, 1].add(hw_y)
@@ -586,9 +589,9 @@ class LBMBase(object):
             # Each edge is represented as an array of indices. For example, the bottom edge includes
             # all points where the y-coordinate is 0, so its indices are [[i, 0] for i in range(self.nx)].
             bounding_box = {"bottom": np.array([[i, 0] for i in range(self.nx)], dtype=int),
-                           "top": np.array([[i, self.ny - 1] for i in range(self.nx)], dtype=int),
-                           "left": np.array([[0, i] for i in range(self.ny)], dtype=int),
-                           "right": np.array([[self.nx - 1, i] for i in range(self.ny)], dtype=int)}
+                            "top": np.array([[i, self.ny - 1] for i in range(self.nx)], dtype=int),
+                            "left": np.array([[0, i] for i in range(self.ny)], dtype=int),
+                            "right": np.array([[self.nx - 1, i] for i in range(self.ny)], dtype=int)}
             return bounding_box
 
         elif self.d == 3:
@@ -597,7 +600,7 @@ class LBMBase(object):
             # where the z-coordinate is 0, so its indices are [[i, j, 0] for i in range(self.nx) for j in range(self.ny)].
             bounding_box = {
                 "bottom": np.array([[i, j, 0] for i in range(self.nx) for j in range(self.ny)], dtype=int),
-                "top": np.array([[i, j, self.nz - 1] for i in range(self.nx) for j in range(self.ny)],dtype=int),
+                "top": np.array([[i, j, self.nz - 1] for i in range(self.nx) for j in range(self.ny)], dtype=int),
                 "left": np.array([[0, j, k] for j in range(self.ny) for k in range(self.nz)], dtype=int),
                 "right": np.array([[self.nx - 1, j, k] for j in range(self.ny) for k in range(self.nz)], dtype=int),
                 "front": np.array([[i, 0, k] for i in range(self.nx) for k in range(self.nz)], dtype=int),
@@ -642,7 +645,7 @@ class LBMBase(object):
         return lax.ppermute(x, perm=self.left_perm, axis_name=axis_name)
 
     @partial(jit, static_argnums=(0,), donate_argnums=(1,))
-    def streaming_p(self,fin):
+    def streaming_p(self, fin):
         """
         Perform streaming operation on a partitioned (in the x-direction) distribution function
 
@@ -654,12 +657,14 @@ class LBMBase(object):
             f: jax.ndarray
                 Distribution function after streaming has been applied
         """
+
         def streaming_i(f, e):
             if self.d == 2:
-                return jnp.roll(f,(e[0], e[1]), axis=(0, 1))
+                return jnp.roll(f, (e[0], e[1]), axis=(0, 1))
             elif self.d == 3:
-                return jnp.roll(f,(e[0], e[1], e[2]),axis=(0, 1, 2))
-        return vmap(streaming_i, in_axes=(-1,0), out_axes=-1)(fin, self.e.T)
+                return jnp.roll(f, (e[0], e[1], e[2]), axis=(0, 1, 2))
+
+        return vmap(streaming_i, in_axes=(-1, 0), out_axes=-1)(fin, self.e.T)
 
     def streaming_m(self, f):
         """
@@ -718,7 +723,7 @@ class LBMBase(object):
         """
         return jnp.dot(fneq, self.lattice.ee)
 
-    @partial(jit, static_argnums=(0,3))
+    @partial(jit, static_argnums=(0, 3))
     def equilibrium(self, rho, u, cast_output=True):
         """
         Compute the equillibrium distribution function using the given values of density and velocity.
@@ -741,7 +746,7 @@ class LBMBase(object):
         e = jnp.array(self.e, dtype=self.precision_policy.compute_dtype)
         udote = jnp.dot(u, e)
         udotu = jnp.sum(jnp.square(u), axis=-1, keepdims=True)
-        feq = rho * self.w * (1.0 + udote*(3.0 + 4.5*udote) - 1.5*udotu)
+        feq = rho * self.w * (1.0 + udote * (3.0 + 4.5 * udote) - 1.5 * udotu)
 
         if cast_output:
             return self.precision_policy.cast_to_output(feq)
@@ -754,11 +759,11 @@ class LBMBase(object):
         Implementation of the collision step in the Lattice Boltzmann Method. Defined in collision model sub-class.
 
         Arguments:
-            fin: Array-like
+            fin: jac.numpy.ndarray
                 Distribution function.
-            rho: Array-like
+            rho: jax.numpy.ndarray
                 Density at all the lattice nodes.
-            u: Array-like
+            u: jax.numpy.ndarray
                 Velocity at all the lattice nodes.
 
         Returns:
@@ -767,15 +772,15 @@ class LBMBase(object):
         """
         pass
 
-    @partial(jit, static_argnums=(0,4))
+    @partial(jit, static_argnums=(0, 4))
     def apply_boundary_conditions(self, fout, fin, timestep, implementation_step):
         """
         Apply the boundary condition to the grid points identified in the boundary_indices (see boundary_conditions.py)
 
         Arguments:
-            fout: Array-like
+            fout: jax.numpy.ndarray
                 Output distribution function.
-            fin: Array-like
+            fin: jax.numpy.ndarray
                 Input distribution function.
             timestep: int
                 Timestep to be used for applying the boundary condition.
@@ -784,7 +789,7 @@ class LBMBase(object):
                 The implementation step is matched for boundary condition for all the lattice points.
 
         Returns:
-            fout: Array-like
+            fout: jax.numpy.ndarray
                 Output distribution values at lattice nodes.
         """
         for bc in self.boundary_conditions:
@@ -796,7 +801,7 @@ class LBMBase(object):
                     fout = fout.at[bc.boundary_indices].set(bc.apply(fout, fin))
         return fout
 
-    @partial(jit, static_argnums=(0,1))
+    @partial(jit, static_argnums=(0, 1))
     def calculate_mlups(self, t_total):
         """
         Calculate the performance of the LBM code using MLUPS: Million Lattice Updates Per Second (MLUPS)
@@ -824,30 +829,19 @@ class LBMBase(object):
     @partial(jit, static_argnums=(0,), donate_argnums=(1,))
     def step(self, f_poststreaming, timestep):
         """
-        Perform one step of LBM simulation. The sequence of operation is:
-        1. Collide
-        2. Apply/store values of distribution for specific nodes, if necessary (useful for the halfway bounce-back boundary condition)
-        3. Stream
-        4. Apply boundary conditions for the specific nodes.
-        5. Modify the distribution if corresponding body force model is present.
-        6. Apply body force to the macroscopic flow variables if corresponding body force model is present.
-        7. Return the distribution the macroscopic flow data.
+        Perform one step of LBM simulation. 
 
         Arguments:
-            fin: Array-like
-                Input distribution function.
-            rho: Array-like
-                Density values.
-            u: Array-like
-                Velocity values.
+            f_poststreaming: jax.numpy.ndarray
+                Post-streaming distribution function.
+            timestep: int
+                Current timestep
 
         Returns:
-            fout: Array-like
-                Output distribution function.
-            rho: Array-like
-                Density values.
-            u: Array-like
-                Velocity values.
+            f_poststreaming: jax.numpy.ndarray
+                Post-streaming distribution function.
+            f_collision: jax.numpy.ndarray
+                Post-collision distribution function.
         """
         f_postcollision = self.collision(f_poststreaming)
         f_postcollision = self.apply_boundary_conditions(f_postcollision, f_poststreaming, timestep, "post_collision")
@@ -869,9 +863,8 @@ class LBMBase(object):
         The function can also print the progress of the simulation, save the simulation data, and
         compute the performance of the simulation in million lattice updates per second (MLUPS).
 
-        Parameters:
-            self.total_timesteps: int
-                The total number of time steps to run the simulation.
+        Arguments:
+            None
         Returns:
             f: jax.numpy.ndarray
                 The distribution functions after the simulation.
@@ -894,15 +887,17 @@ class LBMBase(object):
 
                 start_step = latest_step + 1
                 if not (self.total_timesteps > start_step):
-                    raise ValueError(f"Simulation already exceeded maximum allowable steps (self.total_timesteps = {self.total_timesteps}). Consider increasing self.total_timesteps.")
+                    raise ValueError(
+                        f"Simulation already exceeded maximum allowable steps (self.total_timesteps = {self.total_timesteps}). Consider increasing self.total_timesteps.")
 
         if self.compute_mlups:
             start = time.time()
 
         # Loop over all time steps
         for timestep in range(start_step, self.total_timesteps + 1):
-            io_flag = self.write_control > 0 and ((timestep - self.write_start) % self.write_control == 0 or timestep == self.total_timesteps)
-            print_iter_flag = self.print_info_rate> 0 and timestep % self.print_info_rate == 0
+            io_flag = self.write_control > 0 and (
+                        (timestep - self.write_start) % self.write_control == 0 or timestep == self.total_timesteps)
+            print_iter_flag = self.print_info_rate > 0 and timestep % self.print_info_rate == 0
             checkpoint_flag = self.checkpoint_rate > 0 and timestep % self.checkpoint_rate == 0
 
             if io_flag:
@@ -919,7 +914,9 @@ class LBMBase(object):
 
             # Print the progress of the simulation
             if print_iter_flag:
-                print(colored("Timestep ", 'blue') + colored(f"{timestep}", 'green') + colored(" of ", 'blue') + colored(f"{self.total_timesteps}", 'green') + colored(" completed", 'blue'))
+                print(
+                    colored("Timestep ", 'blue') + colored(f"{timestep}", 'green') + colored(" of ", 'blue') + colored(
+                        f"{self.total_timesteps}", 'green') + colored(" completed", 'blue'))
 
             if io_flag:
                 # Save the simulation data
@@ -951,14 +948,20 @@ class LBMBase(object):
             jax.block_until_ready(f)
             end = time.time()
             if self.d == 2:
-                print(colored("Domain: ", 'blue') + colored(f"{self.nx} x {self.ny}", 'green') if self.d == 2 else colored(f"{self.nx} x {self.ny} x {self.nz}", 'green'))
-                print(colored("Number of voxels: ", 'blue') + colored(f"{self.nx * self.ny}", 'green') if self.d == 2 else colored(f"{self.nx * self.ny * self.nz}", 'green'))
-                print(colored("MLUPS: ", 'blue') + colored(f"{self.nx * self.ny * self.total_timesteps / (end - start) / 1e6}", 'red'))
+                print(colored("Domain: ", 'blue') + colored(f"{self.nx} x {self.ny}",
+                                                            'green') if self.d == 2 else colored(
+                    f"{self.nx} x {self.ny} x {self.nz}", 'green'))
+                print(colored("Number of voxels: ", 'blue') + colored(f"{self.nx * self.ny}",
+                                                                      'green') if self.d == 2 else colored(
+                    f"{self.nx * self.ny * self.nz}", 'green'))
+                print(colored("MLUPS: ", 'blue') + colored(
+                    f"{self.nx * self.ny * self.total_timesteps / (end - start) / 1e6}", 'red'))
 
             elif self.d == 3:
                 print(colored("Domain: ", 'blue') + colored(f"{self.nx} x {self.ny} x {self.nz}", 'green'))
                 print(colored("Number of voxels: ", 'blue') + colored(f"{self.nx * self.ny * self.nz}", 'green'))
-                print(colored("MLUPS: ", 'blue') + colored(f"{self.nx * self.ny * self.nz * self.total_timesteps / (end - start) / 1e6}", 'red'))
+                print(colored("MLUPS: ", 'blue') + colored(
+                    f"{self.nx * self.ny * self.nz * self.total_timesteps / (end - start) / 1e6}", 'red'))
 
         return f
 
@@ -1034,7 +1037,6 @@ class LBMBase(object):
                 The force to be applied to the fluid.
         """
         pass
-
 
     @partial(jit, static_argnums=(0,), inline=True)
     def apply_force(self, f_postcollision, feq, rho, u):

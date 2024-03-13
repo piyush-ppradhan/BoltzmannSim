@@ -1,9 +1,7 @@
 import os
 
-from src.conversion_parameters import *
-from src.base import *
-from src.collision_models import *
-from src.lattice import *
+from src.collision_models import BGK
+from src.lattice import D2Q9
 from src.boundary_conditions import *
 from src.utilities import *
 
@@ -35,7 +33,7 @@ class Cavity2D(BGK):
         timestep = kwargs["timestep"]
         save_image(timestep, u)
         fields = {"rho": rho[..., 0], "ux": u[..., 0], "uy": u[..., 1]}
-        write_vtk("output", "data", timestep, fields, self.conv_param)
+        write_vtk("output", "data", timestep, fields)
 
 if __name__ == "__main__":
     precision = "f32"
@@ -58,7 +56,6 @@ if __name__ == "__main__":
 
     kwargs = {
         'lattice': lattice,
-        'conversion_parameters': NoConversion(),
         'omega': omega,
         'nx': nx,
         'ny': ny,

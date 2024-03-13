@@ -1,13 +1,67 @@
 # BoltzmannSim: High-Performance Lattice Boltzmann Simulation
 
-BoltzmannSim is a high-performance 2D/3D Lattice Boltzmann Method (LBM) library that can be run on accelerated hardware (GPU, TPU). It is written using the [JAX](https://github.com/google/jax) library.
+BoltzmannSim is a high-performance 2D/3D Lattice Boltzmann Method (LBM) library that can be run on accelerated hardware (GPU, TPU). It is written using the [JAX](https://github.com/google/jax) library. 
+The library is based on [XLB](https://github.com/Autodesk/XLB), a high performance simulation library that uses Lattice Boltzmann Method, developed at Autodesk.
 
-## Additional Features
-1. Single Phase Flows
-2. Multiphase Flows
-3. Chemical Reactions 
-4. Direct scaling between lattice and physical units
-5. Generalized approach for applying external forces
+## Key Features
+- **Integration with JAX Ecosystem:** The library can be easily integrated with JAX's robust ecosystem of machine learning libraries such as [Flax](https://github.com/google/flax), [Haiku](https://github.com/deepmind/dm-haiku), [Optax](https://github.com/deepmind/optax), and many more.
+- **Differentiable LBM Kernels:** XLB provides differentiable LBM kernels that can be used in differentiable physics and deep learning applications.
+- **Scalability:** XLB is capable of scaling on distributed multi-GPU systems, enabling the execution of large-scale simulations on hundreds of GPUs with billions of cells.
+- **Support for Various LBM Boundary Conditions and Kernels:** XLB supports several LBM boundary conditions and collision kernels.
+- **User-Friendly Interface:** Written entirely in Python, XLB emphasizes a highly accessible interface that allows users to extend the library with ease and quickly set up and run new simulations.
+- **Leverages JAX Array and Shardmap:** The library incorporates the new JAX array unified array type and JAX shardmap, providing users with a numpy-like interface. This allows users to focus solely on the semantics, leaving performance optimizations to the compiler.
+- **Platform Versatility:** The same XLB code can be executed on a variety of platforms including multi-core CPUs, single or multi-GPU systems, TPUs, and it also supports distributed runs on multi-GPU systems or TPU Pod slices.
+- **Visualization:** XLB provides a variety of visualization options including in-situ on GPU rendering using [PhantomGaze](https://github.com/loliverhennigh/PhantomGaze).
+
+## Showcase
+
+## Capabilities 
+
+### LBM
+
+- BGK (Bhatnagar-Gross-Krook) collision model (Standard LBM collision model)
+- MRT (Multi-Relaxation Time) collision model.
+
+### Machine Learning
+
+- Easy integration with JAX's ecosystem of machine learning libraries
+- Differentiable LBM kernels
+- Differentiable boundary conditions
+
+### Lattice Models
+
+- D2Q9
+- D3Q19
+- D3Q27 (Must be used for KBC simulation runs)
+
+### Compute Capabilities
+- Distributed Multi-GPU support
+- Mixed-Precision support (store vs compute)
+- Out-of-core support (coming soon)
+
+### Output
+
+- Binary and ASCII VTK output (based on PyVista library)
+- In-situ rendering using [PhantomGaze](https://github.com/loliverhennigh/PhantomGaze) library
+- [Orbax](https://github.com/google/orbax)-based distributed asynchronous checkpointing
+- Image Output
+- 3D mesh voxelizer using trimesh
+
+### Boundary conditions
+
+- **Equilibrium BC:** In this boundary condition, the fluid populations are assumed to be in at equilibrium. Can be used to set prescribed velocity or pressure.
+
+- **Full-Way Bounceback BC:** In this boundary condition, the velocity of the fluid populations is reflected back to the fluid side of the boundary, resulting in zero fluid velocity at the boundary.
+
+- **Half-Way Bounceback BC:** Similar to the Full-Way Bounceback BC, in this boundary condition, the velocity of the fluid populations is partially reflected back to the fluid side of the boundary, resulting in a non-zero fluid velocity at the boundary.
+
+- **Do Nothing BC:** In this boundary condition, the fluid populations are allowed to pass through the boundary without any reflection or modification.
+
+- **Zouhe BC:** This boundary condition is used to impose a prescribed velocity or pressure profile at the boundary.
+- **Regularized BC:** This boundary condition is used to impose a prescribed velocity or pressure profile at the boundary. This BC is more stable than Zouhe BC, but computationally more expensive.
+- **Extrapolation Outflow BC:** A type of outflow boundary condition that uses extrapolation to avoid strong wave reflections.
+
+- **Interpolated Bounceback BC:** Interpolated bounce-back boundary condition due to Bouzidi for a lattice Boltzmann method simulation.
 
 ## Installation Guide
 
@@ -31,8 +85,8 @@ pip install pyvista numpy matplotlib Rtree trimesh jmp orbax-checkpoint termcolo
 
 Run an example:
 ```bash
-git clone https://github.com/Autodesk/XLB
-cd XLB
+git clone https://github.com/p0209p/BoltzmannSim
+cd BoltzmannSim
 export PYTHONPATH=.
 python3 examples/CFD/cavity2d.py
 ```

@@ -44,7 +44,7 @@ class Couette(BGK):
         print("error= {:07.6f}".format(err))
         save_image(timestep, u)
         fields = {"rho": rho[..., 0], "u_x": u[..., 0], "u_y": u[..., 1]}
-        write_vtk("output", "data", timestep, fields, self.conv_param)
+        write_vtk("output", "data", timestep, fields)
 
 if __name__ == "__main__":
     precision = "f32"
@@ -67,7 +67,6 @@ if __name__ == "__main__":
 
     kwargs = {
         'lattice': lattice,
-        'conversion_parameters': NoConversion(),
         'omega': omega,
         'nx': nx,
         'ny': ny,

@@ -9,10 +9,6 @@ from src.boundary_conditions import *
 from src.collision_models import BGK, AdvectionDiffusionBGK
 from src.lattice import LatticeD2Q9
 
-# Use 8 CPU devices
-# os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=8'
-# disable JIt compilation
-
 jax.config.update('jax_enable_x64', True)
 
 def taylor_green_initial_fields(xx, yy, u0, rho0, nu, time):

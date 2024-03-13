@@ -197,7 +197,7 @@ class D2Q9(Lattice):
     """
     def __init__(self,precision="f32"):
         super().__init__("D2Q9",precision)
-        self.compute_constants
+        self.compute_constants()
 
     def compute_constants(self):
         """

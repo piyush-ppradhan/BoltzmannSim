@@ -85,10 +85,11 @@ def save_image(timestep, fld, prefix=None):
     plt.clf()
     plt.imsave(fname + '.png', fld.T, cmap=cm.nipy_spectral, origin='lower')
 
+# TODO
 def read_tiff_file(filename):
   pass
 
-def write_vtk(output_dir, prefix, time_step, fields, conv_param):
+def write_vtk(output_dir, prefix, time_step, fields):
   """
   Write the macroscopic flow variables in a VTK file. The mesh is assumed to be structured and hence no coordinate information needs to be passed.
 
@@ -99,8 +100,6 @@ def write_vtk(output_dir, prefix, time_step, fields, conv_param):
       Timestep of VTK export
     rho: array[float]
       Numpy data that stores the density at the grid points. Dimension: (nx,ny,nz) for 3D and (nx,ny) for 2D.
-    conv_param: ConversionParameters
-      Conversion parameters defined to convert the values in Lattice Units to SI units.
     lattice: Lattice
       Lattice used in the simulation. Used for accessing c_s2 attribute
     write_precision: type
@@ -126,17 +125,19 @@ def write_vtk(output_dir, prefix, time_step, fields, conv_param):
   grid = pv.ImageData(dimensions=dimensions)
   grid.origin = (0.0, 0.0, 0.0)
   # Scaling the lattice grid points using conversion parameters
-  grid.spacing = (conv_param.C_l,conv_param.C_l,conv_param.C_l) 
+  #grid.spacing = (conv_param.C_l, conv_param.C_l, conv_param.C_l*300) 
 
   # Transfer the arrays to the memory from the host
   for key, val in fields.items():
     if key == "rho":
-       grid[key] = conv_param.to_physical_units(val.flatten(order='F'), "density")
+       grid[key] = val.flatten(order='F')
     elif key in ["ux", "uy", "uz", "u_x", "u_y", "u_z", "vel_x", "vel_y", "vel_z"]:
-       grid[key] = conv_param.to_physical_units(val.flatten(order='F'), "velocity")
-  
+       grid[key] = val.flatten(order='F')
+    elif key in ["p", "P"]:
+       grid[key] = val.flatten(order='F')
   filename = os.path.join(output_dir, prefix+"_"+f"{time_step:07}.vtk")
   grid.save(filename, binary=True)
+
 @partial(jit, static_argnums=(1, 2))
 def downsample_field(field, factor, method='bicubic'):
   """
