@@ -155,7 +155,8 @@ class LBMBase(object):
                                            in_specs=P("x", None, None), out_specs=P("x", None, None),
                                            check_rep=False))
         elif self.d == 3:
-            self.devices = mesh_utils.create_device_mesh((self.n_devices, 1, 1))
+            self.devices = mesh_utils.create_device_mesh((self.n_devices, 1, 1, 1))
+            self.mesh = Mesh(self.devices, axis_names=("x", "y", "z", "name"))
             self.sharding = NamedSharding(self.mesh, P("x", "y", "z", "name"))
 
             self.streaming = jit(shard_map(self.streaming_m, mesh=self.mesh,
@@ -458,7 +459,7 @@ class LBMBase(object):
 
     def distributed_array_init(self, shape, ttype, init_val=0, sharding=None):
         """
-        Generate a jax distributed with given shape, type, initial value and sharding strategy.
+        Generate a jax distributed array with given shape, type, initial value and sharding strategy.
 
         Arguments:
             shape: tuple
@@ -494,8 +495,7 @@ class LBMBase(object):
             This indicates that the actual values should be set elsewhere.
         """
         print("Default initial conditions assumed: density = 1.0 and velocity = 0.0")
-        print(
-            "To set explicit initial values for velocity and density, use the self.initialize_macroscopic_fields function")
+        print("To set explicit initial values for velocity and density, use the self.initialize_macroscopic_fields function")
         return None, None
 
     def assign_fields_sharded(self):

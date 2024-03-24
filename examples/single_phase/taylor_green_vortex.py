@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from src.utilities import *
 from src.boundary_conditions import *
 from src.collision_models import BGK, AdvectionDiffusionBGK
-from src.lattice import LatticeD2Q9
+from src.lattice import D2Q9
 
 jax.config.update('jax_enable_x64', True)
 
@@ -66,7 +66,7 @@ if __name__ == "__main__":
     result_dict['resolution_list'] = resList
 
     for precision in precision_list:
-        lattice = LatticeD2Q9(precision)
+        lattice = D2Q9(precision)
         ErrL2ResList = []
         ErrL2ResListRho = []
         result_dict[precision] = dict.fromkeys(['vel_error', 'rho_error'])
@@ -85,20 +85,23 @@ if __name__ == "__main__":
             visc = vel_ref * nx / Re
             omega = 1.0 / (3.0 * visc + 0.5)
             os.system("rm -rf ./*.vtk && rm -rf ./*.png")
+            tc = 2.0/(2. * visc * (kx**2 + ky**2))
+            endTime = int(0.05*tc)
             kwargs = {
                 'lattice': lattice,
                 'omega': omega,
                 'nx': nx,
                 'ny': ny,
                 'nz': 0,
-                'precision': precision,
-                'io_rate': 5000,
+                'total_timesteps': endTime,
+                'write_precision': precision,
+                'write_start': 0,
+                'write_control': 5000,
+                "output_dir": "output"+precision+"_nx"+str(nx),
                 'print_info_rate': 1000
             }
             sim = TaylorGreenVortex(**kwargs)
-            tc = 2.0/(2. * visc * (kx**2 + ky**2))
-            endTime = int(0.05*tc)
-            sim.run(endTime)
+            sim.run()
         result_dict[precision]['vel_error'] = ErrL2ResList
         result_dict[precision]['rho_error'] = ErrL2ResListRho
 

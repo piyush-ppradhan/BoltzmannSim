@@ -25,8 +25,6 @@ class Lattice(object):
     """
     def __init__(self, name, precision):
         self.name = name
-        self.d = int(name[1])
-        self.q = int(name[3])
         match(precision):
             case "f16":
                 self.precision = jnp.float16
@@ -145,7 +143,7 @@ class Lattice(object):
                 w[0] = 4.0 / 9.0
             case "D3Q19":
                 w = (1.0 / 36.0) * np.ones(self.q)
-                w[np.isclose(np.linalg.norm(e,axis=1),1,atol=1e-9)] = 1.0 / 18.0
+                w[np.isclose(np.linalg.norm(e, axis=1), 1.0, atol=1e-9)] = 1.0 / 18.0
                 w[np.linalg.norm(e, axis=1) > 1.1] = 1.0 / 36.0
                 w[0] = 1.0 / 3.0
             case "D3Q27":
@@ -196,6 +194,8 @@ class D2Q9(Lattice):
         e: Array-like
     """
     def __init__(self,precision="f32"):
+        self.d = 2
+        self.q = 9
         super().__init__("D2Q9",precision)
         self.compute_constants()
 
@@ -227,6 +227,8 @@ class D3Q19(Lattice):
         e: array[int]
     """
     def __init__(self,precision="f32"):
+        self.d = 3
+        self.q = 19
         super().__init__("D3Q19",precision)
         self.compute_constants()
 
@@ -255,6 +257,8 @@ class D3Q27(Lattice):
         e: array[int]
     """
     def __init__(self,precision="f32"):
+        self.d = 3
+        self.q = 27
         super().__init__("D3Q27",precision)
         self.compute_constants()
 

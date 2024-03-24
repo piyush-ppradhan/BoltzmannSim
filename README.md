@@ -20,7 +20,7 @@ The library is based on [XLB](https://github.com/Autodesk/XLB), a high performan
 ### LBM
 
 - BGK (Bhatnagar-Gross-Krook) collision model (Standard LBM collision model)
-- MRT (Multi-Relaxation Time) collision model.
+- Multiphase flows (Shan-Chen model)
 
 ### Machine Learning
 
@@ -65,7 +65,7 @@ The library is based on [XLB](https://github.com/Autodesk/XLB), a high performan
 
 ## Installation Guide
 
-To use JLBM, you must first install JAX and other dependencies using the following commands:
+To use BoltzmannSim, you must first install JAX and other dependencies using the following commands:
 
 Please refer to https://github.com/google/jax for the latest installation documentation. The following table is taken from [JAX's Github page](https://github.com/google/jax).
 
@@ -85,7 +85,7 @@ pip install pyvista numpy matplotlib Rtree trimesh jmp orbax-checkpoint termcolo
 
 Run an example:
 ```bash
-git clone https://github.com/p0209p/BoltzmannSim
+git clone https://github.com/piyush-ppradhan/BoltzmannSim
 cd BoltzmannSim
 export PYTHONPATH=.
 python3 examples/CFD/cavity2d.py

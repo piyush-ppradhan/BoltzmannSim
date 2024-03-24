@@ -26,6 +26,28 @@ class BGK(LBMBase):
             fout = self.apply_force(fout, feq, rho, u)
         return self.precision_policy.cast_to_output(fout)
 
+class AdvectionDiffusionBGK(LBMBase):
+    """
+    Advection Diffusion Model based on the BGK model.
+    """
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.vel = kwargs.get("vel", None)
+        if self.vel is None:
+            raise ValueError("Velocity must be specified for AdvectionDiffusionBGK.")
+
+    @partial(jit, static_argnums=(0,), donate_argnums=(1,))
+    def collision(self, f):
+        """
+        BGK collision step for lattice.
+        """
+        f = self.precisionPolicy.cast_to_compute(f)
+        rho =jnp.sum(f, axis=-1, keepdims=True)
+        feq = self.equilibrium(rho, self.vel, cast_output=False)
+        fneq = f - feq
+        fout = f - self.omega * fneq
+        return self.precisionPolicy.cast_to_output(fout)
+
 # Write the matrix for MRT collision model for D2Q9 lattice
 #TODO
 class MRT(LBMBase):

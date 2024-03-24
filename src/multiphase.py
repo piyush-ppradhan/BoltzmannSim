@@ -53,6 +53,7 @@ class Multiphase(BGK):
     """
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self.omega = self._omega
         self.R = kwargs.get("gas_constant", 0.0)
         self.T = kwargs.get("temperature", 0.0)
         self.n_components = kwargs.get("n_components")
@@ -63,11 +64,12 @@ class Multiphase(BGK):
         self.G_kk_tree = self.compute_G_kkprime()
         self.G_ks_tree = self.compute_G_ks()
         if self.d == 2:
-            self.solid_mask = jnp.array(self.solid_mask.reshape(self.nx, self.ny, -1), dtype=jnp.int16)
+            self.solid_mask = jnp.array(self.solid_mask.reshape(self.nx, self.ny, 1), dtype=jnp.int16) if self.solid_mask is not None else jnp.zeros((self.nx, self.ny, 1), dtype=jnp.int32)
         elif self.d == 3:
-            self.solid_mask = jnp.array(self.solid_mask.reshape(self.nx, self.ny, self.nz, -1), dtype=jnp.int32)
+            self.solid_mask = jnp.array(self.solid_mask.reshape(self.nx, self.ny, self.nz, 1), dtype=jnp.int32) if self.solid_mask is not None else jnp.zeros((self.nx, self.ny, self.nz, 1), dtype=jnp.int32)
         else:
             raise ValueError("Invalid dimension. Only 2D and 3D simulations are supported.")
+        self.solid_mask = jnp.repeat(self.solid_mask, self.q, axis=-1)
         self.solid_mask_streamed = self.streaming(self.solid_mask)
         assert len(self.omega) == self.n_components, "Number of relaxation parameters must be equal to the number of components."
 
@@ -77,12 +79,15 @@ class Multiphase(BGK):
     
     @omega.setter
     def omega(self, value):
-        if not isinstance(value, (list, np.ndarray)):
+        if not isinstance(value, (list, dict, np.ndarray)):
             raise ValueError("omega must be a list or numpy.ndarray")
-        component_name = lambda i: f"component_{i}"
-        self._omega = {}
-        for i in range(len(value)):
-            self._omega[component_name(i)] = value[i]
+        if isinstance(value, dict):
+            self._omega = value
+        else:
+            component_name = lambda i: f"component_{i}"
+            self._omega = {}
+            for i in range(len(value)):
+                self._omega[component_name(i)] = value[i]
 
     @property
     def R(self):
@@ -120,7 +125,7 @@ class Multiphase(BGK):
     def g_kk(self, value):
         if np.shape(value) != (self.n_components, self.n_components):
             raise ValueError("g_kk must be a matrix of size n_components x n_components")
-        self._g_kk = value
+        self._g_kk = np.array(value)
 
     @property
     def g_kw(self):
@@ -139,22 +144,22 @@ class Multiphase(BGK):
 
         Arguments:
             rho_tree: pytree of jax.numpy.ndarray
-                pytree of density values.
+                Pytree of density values.
             u_tree: jax.numpy.ndarray
-                pytree of velocity values.
+                Pytree of velocity values.
             cast_output: bool {Optional}
                 A flag to cast the density and velocity values to the compute and output precision. Default: True
 
         Returns:
             feq: pytree of jax.numpy.ndarray
-                pytree of equillibrium distribution.
+                Pytree of equillibrium distribution.
         """
         if cast_output:
-            cast= lambda rho, u: self.precision_policy.cast_to_compute((rho, u))
+            cast = lambda rho, u: self.precision_policy.cast_to_compute((rho, u))
             rho_tree, u_tree = tree_map(cast, rho_tree, u_tree)
 
         e = jnp.array(self.e, dtype=self.precision_policy.compute_dtype)
-        udote_tree = tree_map(lambda u: np.dot(u, e), u_tree)
+        udote_tree = tree_map(lambda u: jnp.dot(u, e), u_tree)
         udotu_tree = tree_map(lambda u: jnp.sum(jnp.square(u), axis=-1, keepdims=True), u_tree)
         feq_tree  = tree_map(lambda rho, udote, udotu: rho * self.w * (1.0 + udote*(3.0 + 4.5*udote) - 1.5*udotu), rho_tree, udote_tree, udotu_tree)
 
@@ -195,14 +200,14 @@ class Multiphase(BGK):
             2. Fluid-fluid interaction force
             3. Fluid-solid interaction force
         """
-        e = np.array(self.lattice.e).reshape(-1, 1)
+        e = np.array(self.lattice.e).T
         G_kkprime_ = np.zeros((self.q, ))
         if self.d == 2:
-            G_kkprime_[np.linalg.norm(e,axis=-1) == 1] = 1.0
-            G_kkprime_[np.linalg.norm(e,axis=-1) > 1.1] = 1 / 4
+            G_kkprime_[np.linalg.norm(e, axis=-1) == 1] = 1.0
+            G_kkprime_[np.linalg.norm(e, axis=-1) > 1.1] = 1 / 4
         elif self.d == 3:
-            G_kkprime_[np.linalg.norm(e,axis=-1) == 1] = 1.0
-            G_kkprime_[np.linalg.norm(e,axis=-1) > 2.1] = 1 / 3**0.5
+            G_kkprime_[np.linalg.norm(e, axis=-1) == 1] = 1.0
+            G_kkprime_[np.linalg.norm(e, axis=-1) > 2.1] = 1 / 3**0.5
         return G_kkprime_
     
     def compute_G_kkprime(self):
@@ -250,13 +255,75 @@ class Multiphase(BGK):
             G_ks_tree[component_name(k)] = self.g_kw[k] * G_kkprime_
         return G_ks_tree
 
+    def initialize_macroscopic_fields(self):
+        """
+        Functions to initialize the pytrees of density and velocity arrays with their corresponding initial values.
+        By default, velocities is set as 0 everywhere and density as 1.0.
+
+        To use the default values, specify None for rho0 and u0 using the corresponding key i.e., if I want component i to use default values:
+        
+        rho0[component_name(i)], u[component_name(i)] = None, None
+        component_name = lambda i: f"component_{i}"
+
+        Note: 
+            1. Function must be overwritten in a subclass or instance of the class.
+            2. Key for the pytree is defined as: lambda i: f"component_{i}".
+
+        Arguments:
+            None by default, can be overwritten as required
+
+        Returns:
+            None, None: The default density and velocity values, both None.
+            This indicates that the actual values should be set elsewhere.
+        """
+        print("Default initial conditions assumed for the missing entries in the dictionary: density = 1.0 and velocity = 0.0")
+        print("To set explicit initial values for velocity and density, use the self.initialize_macroscopic_fields function")
+        return None, None
+
+    def assign_fields_sharded(self):
+        """
+        This function is used to initialize pytree of the distribution arrays using the initial velocities and velocity defined in self.initialize_macroscopic_fields function.
+        To do this, function first uses the initialize_macroscopic_fields function to get the initial values of rho (rho0) and velocity (u0).
+
+        The distribution is initialized with rho0 and u0 values, using the self.equilibrium function.
+        The pytree are defined using the key: lambda i: f"component_{i}". 
+
+        Note: 
+            It is very important too use the same key for the pytree, as jax pytree function (for example, tree_map) use these keys to map the pytree to the function.
+
+        Arguments:
+            None
+
+        Returns:
+            f: pytree of distributed JAX array of shape: (self.nx, self.ny, self.q) for 2D and (self.nx, self.ny, self.nz, self.q) for 3D.
+        """
+        component_name = lambda i: f"component_{i}"
+        rho0_tree, u0_tree = self.initialize_macroscopic_fields()
+        shape = (self.nx, self.ny, self.q) if self.d == 2 else (self.nx, self.ny, self.nz, self.q)
+        f_tree = {}
+        if rho0_tree is not None and u0_tree is not None:
+            for i in range(self.n_components):
+                rho0, u0 = rho0_tree[component_name(i)], u0_tree[component_name(i)]
+                if rho0 is None or u0 is None:
+                    f_tree[component_name(i)] = self.distributed_array_init(shape, self.precision_policy.output_dtype, init_val=self.w)
+                else:
+                    f_tree[component_name(i)] = self.initialize_distribution(rho0, u0)
+        else:
+            for i in range(self.n_components):
+                rho0, u0 = rho0_tree[component_name(i)], u0_tree[component_name(i)]
+                if rho0 is None or u0 is None:
+                    f_tree[component_name(i)] = self.distributed_array_init(shape, self.precision_policy.output_dtype, init_val=self.w)
+                else:
+                    f_tree[component_name(i)] = self.initialize_distribution(rho0, u0)
+        return f_tree
+
     @partial(jit, static_argnums=(0,))
     def compute_rho(self, f_tree):
         """
         Compute the number density for all fluids using the respective distribution function. 
 
         Arguments:
-            f_tree: Pytree of jax.numpy.ndarray
+            f_tree: pytree of jax.numpy.ndarray
                 Pytree of distribution arrays.
 
         Returns:
@@ -272,15 +339,15 @@ class Multiphase(BGK):
         Compute the macroscopic variables (density (rho) and velocity (u)) using the distribution function.
 
         Arguments:
-            f_tree: Pytree of jax.numpy.ndarray
+            f_tree: pytree of jax.numpy.ndarray
                 Pytree of distribution arrays.
 
         Returns:
-            rho_tree: Pytree of jax.numpy.ndarray
-            u_tree: Pytree of jax.numpy.ndarray
+            rho_tree: pytree of jax.numpy.ndarray
+            u_tree: pytree of jax.numpy.ndarray
         """
         rho_tree = self.compute_rho(f_tree)
-        u_tree = tree_map(lambda f, rho: jnp.sum(jnp.dot(f, self.e), axis=-1, keepdims=True) / rho, f_tree, rho_tree)
+        u_tree = tree_map(lambda f, rho: jnp.dot(f, self.e.T) / rho, f_tree, rho_tree)
         return rho_tree, u_tree
 
     @partial(jit, static_argnums=(0,))
@@ -293,7 +360,7 @@ class Multiphase(BGK):
                 Pytree of density values.
 
         Returns:
-            p_tree: Pytree of jax.numpy.ndarray
+            p_tree: pytree of jax.numpy.ndarray
                 Pytree of pressure values.
         """
         pass
@@ -305,11 +372,11 @@ class Multiphase(BGK):
         This function uses the value of pressure obtained from EOS and density to compute psi.
 
         Arguments:
-            rho_tree: Pytree of jax.numpy.ndarray
+            rho_tree: pytree of jax.numpy.ndarray
                 Pytree of density values.
 
         Returns:
-            psi_tree: Pytree of jax.numpy.ndarray
+            psi_tree: pytree of jax.numpy.ndarray
         """
         rho_tree = tree_map(lambda rho: self.precision_policy.cast_to_compute(rho), rho_tree)
         p_tree = self.EOS(rho_tree)
@@ -324,11 +391,11 @@ class Multiphase(BGK):
         psi_s = psi(x + e*dt), e is the lattice velocity directions
 
         Arguments:
-            psi_tree: Pytree of jax.numpy.ndarray
+            psi_tree: pytree of jax.numpy.ndarray
                 Pytree of effective mass values.
 
         Returns:
-            psi_s_tree: Pytree of jax.numpy.ndarray
+            psi_s_tree: pytree of jax.numpy.ndarray
         """
         psi_tree = tree_map(lambda psi: jnp.repeat(psi, repeats=self.q, axis=-1), psi_tree)
         psi_s = lambda psi: self.streaming(psi)
@@ -341,7 +408,7 @@ class Multiphase(BGK):
         Compute the force acting on the fluids. This includes fluid-fluid, fluid-solid, and body forces.
 
         Arguments:
-            f_tree: Pytree of jax.numpy.ndarray
+            f_tree: pytree of jax.numpy.ndarray
                 Pytree of distribution array.
 
         Returns:
@@ -366,10 +433,10 @@ class Multiphase(BGK):
                 Pytree of streamed effective mass values.
 
         Returns:
-            Pytree of jax.numpy.ndarray
+            pytree of jax.numpy.ndarray
                 Pytree of fluid-fluid interaction force.
         """
-        neighbour_terms = tree_map(lambda G_kkprime: tree_reduce(operator.add, tree_map(lambda psi_s, G_kkprime_: jnp.dot((psi_s*G_kkprime_), self.e), psi_s_tree, G_kkprime)), self.G_kk_tree)
+        neighbour_terms = tree_map(lambda G_kkprime: tree_reduce(operator.add, tree_map(lambda g_kkprime, psi_s: jnp.dot(g_kkprime * psi_s, self.e), G_kkprime, psi_s_tree)), self.G_kk_tree)
         return tree_map(lambda psi: -psi * neighbour_terms, psi_tree)
 
     @partial(jit, static_argnums=(0,))
@@ -597,29 +664,29 @@ class Multiphase(BGK):
             timestep: int
                 The current time step of the simulation.
             f_tree: pytree of jax.numpy.ndarray
-                pytree of post-streaming distribution functions at the current time step.
+                Pytree of post-streaming distribution functions at the current time step.
             fstar_tree: pytree of jax.numpy.ndarray
-                pytree of post-collision distribution functions at the current time step.
+                Pytree of post-collision distribution functions at the current time step.
             p_tree: pytree of jax.numpy.ndarray
-                pytree of pressure field at the current time step.
+                Pytree of pressure field at the current time step.
             u: jax.numpy.ndarray
                 Common velocity field at the current time step.
             u_tree: pytree of jax.numpy.ndarray
-                pytree of velocity field at the current time step.
+                Pytree of velocity field at the current time step.
             rho: jax.numpy.ndarray
                 Common density field at the current time step.
             rho_tree: pytree of jax.numpy.ndarray
-                pytree of density field at the current time step.
+                Pytree of density field at the current time step.
             p_prev_tree: pytree of jax.numpy.ndarray
-                pytree of pressure field at the previous time step.
+                Pytree of pressure field at the previous time step.
             u_prev: jax.numpy.ndarray
                 Common velocity field at the previous time step.
             u_prev_tree: pytree of jax.numpy.ndarray
-                pytree of velocity field at the previous time step.
+                Pytree of velocity field at the previous time step.
             rho_prev: jax.numpy.ndarray
                 Common density field at the previous time step.
             rho_prev_tree: pytree of jax.numpy.ndarray
-                pytree of density field at the previous time step.
+                Pytree of density field at the previous time step.
         """
         kwargs = {
             "n_components": self.n_components,
