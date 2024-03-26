@@ -13,6 +13,9 @@ The library is based on [XLB](https://github.com/Autodesk/XLB), a high performan
 - **Platform Versatility:** The same XLB code can be executed on a variety of platforms including multi-core CPUs, single or multi-GPU systems, TPUs, and it also supports distributed runs on multi-GPU systems or TPU Pod slices.
 - **Visualization:** XLB provides a variety of visualization options including in-situ on GPU rendering using [PhantomGaze](https://github.com/loliverhennigh/PhantomGaze).
 
+## Modifications to XLB
+- **Multiphase Flows:** We have added support for multiphase flows using the Shan-Chen model. Different Equations of State are also supported, to allow for thermodynamically accurate behavior.
+
 ## Showcase
 
 ## Capabilities 
