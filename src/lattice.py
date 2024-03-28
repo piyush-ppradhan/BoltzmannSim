@@ -1,5 +1,7 @@
 import jax.numpy as jnp
+from jax import config
 import numpy as np
+import re
 
 class Lattice(object):
     """
@@ -32,9 +34,13 @@ class Lattice(object):
                 self.precision = jnp.float32
             case "f64":
                 self.precision = jnp.float64
+                config.update("jax_enable_x64", True)
             case _:
                 ValueError("Invalid precision type. Supported precision: f16, f32, f64")
                 exit()
+        dq = re.findall(r"\d+", name)
+        self.d = int(dq[0])
+        self.q = int(dq[1])
         self.e = jnp.array(self.construct_velocity_directions(),dtype=self.precision)
         self.w = jnp.array(self.construct_lattice_weights(),dtype=self.precision)
         self.main_indices = self.construct_main_velocity_indices()
@@ -62,8 +68,8 @@ class Lattice(object):
             case "D3Q19":
                 e = np.array([(x,y,z) for x in [0,-1,1] for y in [0,-1,1] for z in [0,-1,1]])
                 e = e[np.linalg.norm(e, axis=1) < 1.45]
-            case "D3Q19":
-                e = np.array([(x,y,z) for x in [-1,0,1] for y in [-1,0,1] for z in [-1,0,1]])
+            case "D3Q27":
+                e = np.array([(x,y,z) for x in [0, -1, 1] for y in [0, -1, 1] for z in [0, -1, 1]])
             case _:
                 raise ValueError("Invalid lattice name. Supported lattice name: D2Q9, D3Q19, D3Q27")
         return e.T
@@ -134,23 +140,21 @@ class Lattice(object):
             w: array[float]
                 Lattice weights used for computation.
         """
-        e = self.construct_velocity_directions().squeeze().T
+        e = self.e.T
+        w = (1.0 / 36.0) * np.ones(self.q)
         match(self.name):
             case "D2Q9":
-                w = np.zeros(self.q)
                 w[np.linalg.norm(e,axis=1) < 1.1] = 1.0 / 9.0
-                w[np.linalg.norm(e,axis=1) > 1.1] = 1.0 / 36.0
                 w[0] = 4.0 / 9.0
             case "D3Q19":
-                w = (1.0 / 36.0) * np.ones(self.q)
-                w[np.isclose(np.linalg.norm(e, axis=1), 1.0, atol=1e-9)] = 1.0 / 18.0
-                w[np.linalg.norm(e, axis=1) > 1.1] = 1.0 / 36.0
+                w[np.linalg.norm(e, axis=1) < 1.1] = 2.0 / 36.0
                 w[0] = 1.0 / 3.0
             case "D3Q27":
-                w = (1.0 / 216.0)*np.ones(self.q)
-                w[np.isclose(np.linalg.norm(e,axis=1), 1.0, atol=1e-9)] = 2.0 / 27.0
-                w[1.0 < np.linalg.norm(e,axis=1) < 1.45] = 1.0 / 54.0
-                w[0] = (8.0 / 27.0)
+                el = np.linalg.norm(e, axis=1)
+                w[np.isclose(el, 1.0, atol=1e-08)] = 2.0 / 27.0
+                w[(el > 1) & (el  <= np.sqrt(2))] = 1.0 / 54.0
+                w[(el > np.sqrt(2)) & (el  <= np.sqrt(3))] = 1.0 / 216.0
+                w[0] = 8.0 / 27.0
             case _:
                 ValueError("Invalid lattice name. Supported lattice name: D2Q9, D3Q19, D3Q27")
                 exit()
@@ -194,8 +198,6 @@ class D2Q9(Lattice):
         e: Array-like
     """
     def __init__(self,precision="f32"):
-        self.d = 2
-        self.q = 9
         super().__init__("D2Q9",precision)
         self.compute_constants()
 
@@ -227,8 +229,6 @@ class D3Q19(Lattice):
         e: array[int]
     """
     def __init__(self,precision="f32"):
-        self.d = 3
-        self.q = 19
         super().__init__("D3Q19",precision)
         self.compute_constants()
 
@@ -257,8 +257,6 @@ class D3Q27(Lattice):
         e: array[int]
     """
     def __init__(self,precision="f32"):
-        self.d = 3
-        self.q = 27
         super().__init__("D3Q27",precision)
         self.compute_constants()
 
