@@ -9,6 +9,7 @@ The test is very simple:
 The test is performed for all three lattice classes D2Q9, D3Q19, D3Q27 and for all three precisions f16, f32, f64.
 """
 from src.lattice import D2Q9, D3Q19, D3Q27
+import os
 import numpy as np
 import pytest
 
@@ -38,3 +39,4 @@ def test_velocity_directions():
             e = np.array(obj.e)
             for i in range(obj.d):
                 assert np.sum(e, axis=1)[i] == 0
+    os.system("rm -rf ./test/__pycache__")

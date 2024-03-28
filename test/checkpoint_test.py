@@ -61,12 +61,13 @@ def test_checkpoint():
                 
                 if d == 2:
                     shape = (n, n)
+                    x = np.random.randn(n, n).astype(np_precision(precision))
                 else:
                     shape = (n, n, n)
+                    x = np.random.randn(n, n, n).astype(np_precision(precision))
                 
-                x = float(n) + np.random.randn(1).astype(np_precision(precision)) + np.ones(shape, dtype=np_precision(precision))
 
-                # Save the array to the file
+                # Save the array to file
                 checkpoint_dir = os.path.abspath("./checkpoints_" + precision + "_" + str(n) + "_" + str(d))
                 mngr = orb.CheckpointManager(checkpoint_dir, orb.PyTreeCheckpointer(), options=mngr_options)
                 x_jax = jax.numpy.array(x, dtype=jax_precision(precision))
@@ -83,3 +84,4 @@ def test_checkpoint():
                 assert jax.numpy.allclose(x, y, atol=1e-6)
     # Clean up
     os.system("rm -rf ./checkpoints*")
+    os.system("rm -rf ./test/__pycache__")

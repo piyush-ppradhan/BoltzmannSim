@@ -1,7 +1,7 @@
 # BoltzmannSim: High-Performance Lattice Boltzmann Simulation
 
 BoltzmannSim is a high-performance 2D/3D Lattice Boltzmann Method (LBM) library that can be run on accelerated hardware (GPU, TPU). It is written using the [JAX](https://github.com/google/jax) library. 
-The library is based on [XLB](https://github.com/Autodesk/XLB), a high performance simulation library that uses Lattice Boltzmann Method, developed at Autodesk.
+The library is based on [XLB](https://github.com/Autodesk/XLB), a high performance simulation library that uses Lattice Boltzmann Method.
 
 ## Key Features
 - **Integration with JAX Ecosystem:** The library can be easily integrated with JAX's robust ecosystem of machine learning libraries such as [Flax](https://github.com/google/flax), [Haiku](https://github.com/deepmind/dm-haiku), [Optax](https://github.com/deepmind/optax), and many more.
@@ -83,7 +83,7 @@ Please refer to https://github.com/google/jax for the latest installation docume
 
 Install dependencies:
 ```bash
-pip install pyvista numpy matplotlib Rtree trimesh jmp orbax-checkpoint termcolor
+pip install pytest pyvista numpy matplotlib Rtree trimesh jmp orbax-checkpoint termcolor
 ```
 
 Run an example:
