@@ -21,7 +21,6 @@ def laplace_law(**kwargs):
         T = 1.0
         class LaplaceLaw(eos):
             def initialize_macroscopic_fields(self):
-                component_name = lambda i: f"component_{i}"
                 x = np.linspace(0, self.nx-1, self.nx, dtype=int)
                 y = np.linspace(0, self.ny-1, self.ny, dtype=int)
                 z = np.linspace(0, self.nz-1, self.nz, dtype=int)
@@ -31,8 +30,8 @@ def laplace_law(**kwargs):
 
                 rho = rho_vap * np.ones((self.nx, self.ny, self.nz, 1))
                 rho[idx, idy, idz] = rho_liq
-                rho_tree = {component_name(0): rho}
-                u_tree = {component_name(0): np.zeros((self.nx, self.ny, self.nz, 3))}
+                rho_tree = [rho]
+                u_tree = [np.zeros((self.nx, self.ny, self.nz, 3))]
                 return rho_tree, u_tree
                 
             def output_data(self, **kwargs):

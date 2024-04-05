@@ -1,7 +1,9 @@
-import jax.numpy as jnp
-from jax import config
-import numpy as np
 import re
+
+import jax.numpy as jnp
+import numpy as np
+from jax import config
+
 
 class Lattice(object):
     """
@@ -213,7 +215,6 @@ class D2Q9(Lattice):
         """
         self.c_s = 1.0 / (3.0 ** 0.5)
         self.c_s2 = 1.0 / 3.0
-        self.c0 = 6.0
 
 class D3Q19(Lattice):
     """
@@ -241,7 +242,6 @@ class D3Q19(Lattice):
         """
         self.c_s = 1.0 / (3.0 ** 0.5)
         self.c_s2 = 1.0 / 3.0
-        self.c0 = 6.0
 
 class D3Q27(Lattice):
     """

@@ -8,10 +8,13 @@ The test is very simple:
 
 The test is performed for all three lattice classes D2Q9, D3Q19, D3Q27 and for all three precisions f16, f32, f64.
 """
-from src.lattice import D2Q9, D3Q19, D3Q27
 import os
+
 import numpy as np
 import pytest
+
+from src.lattice import D2Q9, D3Q19, D3Q27
+
 
 def test_weights():
     """

@@ -1,24 +1,24 @@
 # System libraries
 import os
-from time import time
 from functools import partial
+from time import time
+
 import __main__
+# JAX specific libraries
+import jax.numpy as jnp
+# Third-party libraries
+import matplotlib.pyplot as plt
+import numpy as np
+import pyvista as pv
+import trimesh
+from jax import jit
+from jax.image import resize
+from matplotlib import cm
+from termcolor import colored
 
 # Custom libraries
 from src.conversion_parameters import *
 
-# Third-party libraries
-import matplotlib.pyplot as plt
-from matplotlib import cm
-import numpy as np
-import pyvista as pv
-from termcolor import colored
-import trimesh
-
-# JAX specific libraries
-import jax.numpy as jnp
-from jax.image import resize
-from jax import jit
 
 def read_raw_file(filename, width, height, depth=0, data_type=np.uint8):
   """

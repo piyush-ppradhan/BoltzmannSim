@@ -6,23 +6,22 @@ Definition of LBMBase class for defining and running a problem
 import time
 from functools import partial  # Function modifier for identifying the static and traced variables
 
-# Third-party imports
-import numpy as np
-from termcolor import colored  # Colored output to the terminal
 import jax
-import orbax.checkpoint as orb  # For storing and restoring checkpoints
-import jmp  # Mixed precision library for JAX
-
 # JAX-specific imports
 import jax.numpy as jnp
-from jax import jit, lax, vmap, config
+import jmp  # Mixed precision library for JAX
+# Third-party imports
+import numpy as np
+import orbax.checkpoint as orb  # For storing and restoring checkpoints
+from jax import config, jit, lax, vmap
 from jax.experimental import mesh_utils
-from jax.sharding import NamedSharding, PartitionSpec, Mesh
-from jax.experimental.shard_map import shard_map
 from jax.experimental.multihost_utils import process_allgather
+from jax.experimental.shard_map import shard_map
+from jax.sharding import Mesh, NamedSharding, PartitionSpec
+from termcolor import colored  # Colored output to the terminal
 
 # Locally defined functions import
-from src.lattice import *
+from src.lattice import D2Q9
 from src.utilities import downsample_field
 
 

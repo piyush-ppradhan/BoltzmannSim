@@ -8,9 +8,11 @@ The test works as follows:
 The test is performed for all three precisions: f16, f32, f64.
 """
 import os
-import numpy as np
+
 import jax
-import orbax.checkpoint as orb 
+import numpy as np
+import orbax.checkpoint as orb
+
 
 def np_precision(precision):
     """
@@ -58,14 +60,13 @@ def test_checkpoint():
             for precision in ["f16", "f32", "f64"]:
                 if precision == "f64":
                     jax.config.update("jax_enable_x64", True)
-                
+
                 if d == 2:
                     shape = (n, n)
                     x = np.random.randn(n, n).astype(np_precision(precision))
                 else:
                     shape = (n, n, n)
                     x = np.random.randn(n, n, n).astype(np_precision(precision))
-                
 
                 # Save the array to file
                 checkpoint_dir = os.path.abspath("./checkpoints_" + precision + "_" + str(n) + "_" + str(d))

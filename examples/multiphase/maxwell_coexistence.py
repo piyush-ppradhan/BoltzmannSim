@@ -2,9 +2,9 @@
 Maxwell coexistence test case
 """
 
+from src.lattice import D2Q9
 from src.multiphase import *
 from src.utilities import *
-from src.lattice import D2Q9
 
 EOS = [VanderWaals, Peng_Robinson, Redlich_Kwong, Redlich_Kwong_Soave, Carnahan_Starling]
 for eos in EOS:

@@ -3,12 +3,12 @@ This script performs a 2D simulation of Couette flow using the lattice Boltzmann
 """
 import os
 
-from src.utilities import *
-from src.collision_models import BGK
-from src.boundary_conditions import *
-from src.lattice import D2Q9
-
 import numpy as np
+
+from src.boundary_conditions import *
+from src.collision_models import BGK
+from src.lattice import D2Q9
+from src.utilities import *
 
 # config.update('jax_disable_jit', True)
 # os.environ["XLA_FLAGS"] = '--xla_force_host_platform_device_count=4'

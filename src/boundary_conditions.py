@@ -1,7 +1,9 @@
-import numpy as np
-import jax.numpy as jnp
-from jax import jit, device_count
 from functools import partial
+
+import jax.numpy as jnp
+import numpy as np
+from jax import device_count, jit
+
 
 class BoundaryCondition(object):
     """
@@ -246,7 +248,7 @@ class BoundaryCondition(object):
             This method computes the momentum flux by dotting the non-equilibrium distribution function with the lattice
             direction vectors.
         """
-        return jnp.dot(fneq, self.lattice.cc)
+        return jnp.dot(fneq, self.lattice.ee)
 
     @partial(jit, static_argnums=(0,))
     def momentum_exchange_force(self, f_poststreaming, f_postcollision):
@@ -501,15 +503,15 @@ class ZouHe(BoundaryCondition):
         self.prescribed = prescribed
         self.needs_extra_configuration = True
 
-    def configure(self, boundaryMask):
+    def configure(self, boundary_mask):
         """
         Correct boundary indices to ensure that only voxelized surfaces with normal vectors along main cartesian axes
         are assigned this type of BC.
         """
-        nv = np.dot(self.lattice.c, ~boundaryMask.T)
+        nv = np.dot(self.lattice.e, ~boundary_mask.T)
         corner_voxels = np.count_nonzero(nv, axis=0) > 1
         # removed_voxels = np.array(self.indices)[:, corner_voxels]
-        self.indices = tuple(np.array(self.indices)[:, ~corner_voxels])
+        self.boundary_indices = tuple(np.array(self.boundary_indices)[:, ~corner_voxels])
         self.prescribed = self.prescribed[~corner_voxels]
         return
 
@@ -518,8 +520,8 @@ class ZouHe(BoundaryCondition):
         """
         Calculate velocity based on the prescribed pressure/density (Zou/He BC)
         """
-        unormal = -1. + 1. / rho * (jnp.sum(fpop[self.indices] * self.imiddleMask, axis=1, keepdims=True) +
-                               2. * jnp.sum(fpop[self.indices] * self.iknownMask, axis=1, keepdims=True))
+        unormal = -1. + 1. / rho * (jnp.sum(fpop[self.boundary_indices] * self.imiddle_mask, axis=1, keepdims=True) +
+                               2. * jnp.sum(fpop[self.boundary_indices] * self.iknown_mask, axis=1, keepdims=True))
 
         # Return the above unormal as a normal vector which sets the tangential velocities to zero
         vel = unormal * self.normals
@@ -532,8 +534,8 @@ class ZouHe(BoundaryCondition):
         """
         unormal = np.sum(self.normals*vel, axis=1)
 
-        rho = (1.0/(1.0 + unormal))[..., None] * (jnp.sum(fpop[self.indices] * self.imiddleMask, axis=1, keepdims=True) +
-                                  2.*jnp.sum(fpop[self.indices] * self.iknownMask, axis=1, keepdims=True))
+        rho = (1.0/(1.0 + unormal))[..., None] * (jnp.sum(fpop[self.boundary_indices] * self.imiddle_mask, axis=1, keepdims=True) +
+                                  2.*jnp.sum(fpop[self.boundary_indices] * self.iknown_mask, axis=1, keepdims=True))
         return rho
 
     @partial(jit, static_argnums=(0,), inline=True)
@@ -560,10 +562,10 @@ class ZouHe(BoundaryCondition):
         Calculate unknown populations using bounce-back of non-equilibrium populations
         a la original Zou & He formulation
         """
-        nbd = len(self.indices[0])
+        nbd = len(self.boundary_indices[0])
         bindex = np.arange(nbd)[:, None]
-        fbd = fpop[self.indices]
-        fknown = fpop[self.indices][bindex, self.iknown] + feq[bindex, self.imissing] - feq[bindex, self.iknown]
+        fbd = fpop[self.boundary_indices]
+        fknown = fpop[self.boundary_indices][bindex, self.iknown] + feq[bindex, self.imissing] - feq[bindex, self.iknown]
         fbd = fbd.at[bindex, self.imissing].set(fknown)
         return fbd
 
@@ -631,7 +633,7 @@ class Regularized(ZouHe):
         The Qi tensor is used in the regularization of the distribution functions. It is defined as Qi = cc - cs^2*I,
         where cc is the tensor of lattice velocities, cs is the speed of sound, and I is the identity tensor.
         """
-        Qi = self.lattice.cc
+        Qi = self.lattice.ee
         if self.dim == 3:
             diagonal = (0, 3, 5)
             offdiagonal = (1, 2, 4)
