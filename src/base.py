@@ -195,8 +195,14 @@ class LBMBase(object):
     def omega(self, value):
         if value is None:
             raise ValueError("Omega must be provided")
-        if not isinstance(value, float) and not isinstance(value, list):
-            raise ValueError("Omega must be float or list of floats")
+        if (
+            not isinstance(value, float)
+            and not isinstance(value, list)
+            and not isinstance(value, jnp.ndarray)
+        ):
+            raise ValueError(
+                "Omega must be float or list of floats or jax.numpy.ndarray"
+            )
         self._omega = value
 
     @property
