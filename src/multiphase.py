@@ -69,7 +69,7 @@ class Multiphase(BGK):
             jnp.expand_dims(self.solid_mask, axis=-1), repeats=self.q, axis=-1
         )
 
-        self.omega = jnp.array(self.omega, dtype=self.precision_policy.compute_dtype)
+        # self.omega = jnp.array(self.omega, dtype=self.precision_policy.compute_dtype)
         self.g_kkprime = jnp.array(
             self.g_kkprime, dtype=self.precision_policy.compute_dtype
         )
