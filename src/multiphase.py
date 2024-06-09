@@ -488,7 +488,7 @@ class Multiphase(BGK):
             g_kkprime is a row of self.gkkprime, as it represents the interaction between kth component with all components
             """
             return tree_map(
-                lambda g_kkp, psi_s: jnp.dot(g_kkp * self.G_fs * psi_s, self.e),
+                lambda g_kkp, psi_s: jnp.dot(g_kkp * self.G_fs * psi_s, self.e.T),
                 list(g_kkprime),
                 psi_s_tree,
             )
@@ -513,7 +513,7 @@ class Multiphase(BGK):
                 Pytree of fluid-solid interaction force.
         """
         neighbor_terms = tree_map(
-            lambda g_ks: jnp.dot(g_ks * self.G_fs * self.solid_mask_repeated, self.e),
+            lambda g_ks: jnp.dot(g_ks * self.G_fs * self.solid_mask_repeated, self.e.T),
             self.g_ks,
         )
         return tree_map(lambda rho: -rho * neighbor_terms, rho_tree)
@@ -537,9 +537,9 @@ class Multiphase(BGK):
             f_postcollision: jax.numpy.ndarray
                 The post-collision distribution functions with the force applied.
         """
-        delta_u_tree = (
-            self.compute_force(f_postcollision_tree) + self.force
-        )  # self.force is the external body force
+        delta_u_tree = self.compute_force(f_postcollision_tree)
+        delta_u_tree = jax.tree_util.tree_map(lambda x: x + self.force, delta_u_tree)
+        # self.force is the external body force
         u_temp_tree = tree_map(lambda u, delta_u: u + delta_u, u_tree, delta_u_tree)
         feq_force_tree = self.equilibrium(rho_tree, u_temp_tree, cast_output=False)
         update_collision = (
