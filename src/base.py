@@ -456,6 +456,10 @@ class LBMBase(object):
 
         for attr in attributes_to_show:
             value = getattr(self, attr, "Attribute not set")
+            if attr == "lattice":
+                value = getattr(getattr(self, attr), "name")
+            if (attr == "compute_precision") or (attr == "write_precision"):
+                value = getattr(self, attr).__name__
             descriptive_name = descriptive_names.get(
                 attr, attr
             )  # Use the attribute name as a fallback
