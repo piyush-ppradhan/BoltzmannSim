@@ -667,7 +667,7 @@ class Multiphase(BGK):
                     f_tree = self.mngr.restore(
                         latest_step,
                         # restore_kwargs={"restore_args": restore_args},
-                        args=orb.args.StandardSave(abstract_state),
+                        args=orb.args.StandardRestore(abstract_state),
                     )
                     print(f"Restored checkpoint at step {latest_step}.")
                 except ValueError:
