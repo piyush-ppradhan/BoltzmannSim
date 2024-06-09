@@ -53,8 +53,27 @@ class Multiphase(BGK):
     """
 
     def __init__(self, **kwargs):
-        super().__init__(**kwargs)
         self.omega = kwargs.get("omega")
+        self.nx = kwargs.get("nx")
+        self.ny = kwargs.get("ny")
+        self.nz = kwargs.get("nz", 0)
+        self.lattice = kwargs.get("lattice")
+        self.force = kwargs.get("force", 0.0)
+        self.compute_precision = self.set_precision(self.lattice.precision)
+        self.write_precision = self.set_precision(kwargs.get("write_precision"))
+        self.solid_mask = kwargs.get("solid_mask")
+        self.total_timesteps = kwargs.get("total_timesteps")
+        self.compute_mlups = kwargs.get("compute_MLUPS", False)
+        self.checkpoint_rate = kwargs.get("checkpoint_rate", 0)
+        self.checkpoint_dir = kwargs.get("checkpoint_dir", "./checkpoints")
+        self.restore_checkpoint = kwargs.get("restore_checkpoint", False)
+        self.write_start = kwargs.get("write_start")
+        self.write_control = kwargs.get("write_control")
+        self.output_dir = kwargs.get("output_dir")
+        self.print_info_rate = kwargs.get("print_info_rate", 1)
+        self.downsampling_factor = kwargs.get("downsampling_factor", 1)
+        self.return_post_col_dist = kwargs.get("return_post_col_dist", False)
+
         self.R = kwargs.get("gas_constant", 0.0)
         self.T = kwargs.get("temperature", 0.0)
         self.n_components = kwargs.get("n_components")
@@ -82,6 +101,7 @@ class Multiphase(BGK):
 
     @omega.setter
     def omega(self, value):
+        breakpoint()
         if not isinstance(value, list):
             raise ValueError("omega must be a list")
         self._omega = value
