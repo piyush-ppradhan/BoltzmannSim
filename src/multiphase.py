@@ -317,7 +317,7 @@ class Multiphase(BGK):
             (self.nx, self.ny, self.q) if (self.d == 2) else (self.nx, self.ny, self.nz, self.q)
         )
         # fmt:on
-        f_tree = {}
+        f_tree = []
         if rho0_tree is not None and u0_tree is not None:
             assert (
                 len(rho0_tree) == self.n_components
@@ -329,11 +329,13 @@ class Multiphase(BGK):
 
             for i in range(self.n_components):
                 rho0, u0 = rho0_tree[i], u0_tree[i]
-                f_tree[i] = self.initialize_distribution(rho0, u0)
+                f_tree.append(self.initialize_distribution(rho0, u0))
         else:
             for i in range(self.n_components):
-                f_tree[i] = self.distributed_array_init(
-                    shape, self.precision_policy.output_dtype, init_val=self.w
+                f_tree.append(
+                    self.distributed_array_init(
+                        shape, self.precision_policy.output_dtype, init_val=self.w
+                    )
                 )
         return f_tree
 
@@ -644,9 +646,7 @@ class Multiphase(BGK):
             f_tree: pytree of jax.numpy.ndarray
                 pytree of distribution functions after the simulation.
         """
-        f_tree = []
-        for i in range(self.n_components):
-            f_tree.append(self.assign_fields_sharded())[0]
+        f_tree = self.assign_fields_sharded()
         start_step = 0
         if self.restore_checkpoint:
             latest_step = self.mngr.latest_step()
