@@ -646,7 +646,7 @@ class Multiphase(BGK):
         """
         f_tree = []
         for i in range(self.n_components):
-            f_tree.append(self.assign_fields_sharded())
+            f_tree.append(self.assign_fields_sharded())[0]
         start_step = 0
         if self.restore_checkpoint:
             latest_step = self.mngr.latest_step()
