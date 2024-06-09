@@ -81,8 +81,8 @@ class Multiphase(BGK):
 
     @omega.setter
     def omega(self, value):
-        if not isinstance(value, list):
-            raise ValueError("omega must be a list")
+        if not isinstance(value, list) and not isinstance(value, jax.numpy.ndarray):
+            raise ValueError("omega must be a list or jax.numpy.ndarray")
         self._omega = value
 
     @property
