@@ -107,21 +107,28 @@ class LBMBase(object):
         # Configure JAX to use 64-bit precision if necessary
         if self.compute_precision == jnp.float64:
             config.update("jax_enable_x64", True)
-            print(colored("Using 64-bit precision for computation.\n", 'yellow'))
+            print(colored("Using 64-bit precision for computation.\n", "yellow"))
 
-        self.precision_policy = jmp.Policy(compute_dtype=self._compute_precision, param_dtype=self.compute_precision,
-                                           output_dtype=self.write_precision)
+        self.precision_policy = jmp.Policy(
+            compute_dtype=self._compute_precision,
+            param_dtype=self.compute_precision,
+            output_dtype=self.write_precision,
+        )
 
         # Set the checkpoint manager
         if self.checkpoint_rate > 0:
-            mngr_options = orb.CheckpointManagerOptions(save_interval_steps=self.checkpoint_rate, max_to_keep=1)
-            self.mngr = orb.CheckpointManager(self.checkpoint_dir, orb.PyTreeCheckpointer(), options=mngr_options)
+            mngr_options = orb.CheckpointManagerOptions(
+                save_interval_steps=self.checkpoint_rate, max_to_keep=1
+            )
+            self.mngr = orb.CheckpointManager(self.checkpoint_dir, options=mngr_options)
         else:
             self.mngr = None
 
         # Check if nx, ny, nz has been defined appropriately
         if None in {self.nx, self.ny, self.nz}:
-            print("Error: at least nx and ny must be provided to perform the simulation")
+            print(
+                "Error: at least nx and ny must be provided to perform the simulation"
+            )
             exit()
         # Scale nx to be divisible by the number of devices.
         nx = self.nx
@@ -131,11 +138,11 @@ class LBMBase(object):
         self.show_simulation_parameters()
 
         self.grid_info = {
-            'nx': self.nx,
-            'ny': self.ny,
-            'nz': self.nz,
-            'dim': self.d,
-            'lattice': self.lattice
+            "nx": self.nx,
+            "ny": self.ny,
+            "nz": self.nz,
+            "dim": self.d,
+            "lattice": self.lattice,
         }
 
         P = PartitionSpec
@@ -150,17 +157,29 @@ class LBMBase(object):
             self.mesh = Mesh(self.devices, axis_names=("x", "y", "name"))
             self.sharding = NamedSharding(self.mesh, P("x", "y", "name"))
 
-            self.streaming = jit(shard_map(self.streaming_m, mesh=self.mesh,
-                                           in_specs=P("x", None, None), out_specs=P("x", None, None),
-                                           check_rep=False))
+            self.streaming = jit(
+                shard_map(
+                    self.streaming_m,
+                    mesh=self.mesh,
+                    in_specs=P("x", None, None),
+                    out_specs=P("x", None, None),
+                    check_rep=False,
+                )
+            )
         elif self.d == 3:
             self.devices = mesh_utils.create_device_mesh((self.n_devices, 1, 1, 1))
             self.mesh = Mesh(self.devices, axis_names=("x", "y", "z", "name"))
             self.sharding = NamedSharding(self.mesh, P("x", "y", "z", "name"))
 
-            self.streaming = jit(shard_map(self.streaming_m, mesh=self.mesh,
-                                           in_specs=P("x", None, None, None), out_specs=P("x", None, None, None),
-                                           check_rep=False))
+            self.streaming = jit(
+                shard_map(
+                    self.streaming_m,
+                    mesh=self.mesh,
+                    in_specs=P("x", None, None, None),
+                    out_specs=P("x", None, None, None),
+                    check_rep=False,
+                )
+            )
         else:
             raise ValueError("Dimension of the problem must be either 2 or 3")
 
@@ -226,21 +245,9 @@ class LBMBase(object):
             raise ValueError("Value must be provided")
         if self.nz == 0 and not isinstance(value, D2Q9):
             raise ValueError("For 2D simulations, lattice must be D2Q9")
-        if self.nz != 0 and value.name not in ['D3Q19', 'D3Q27']:
+        if self.nz != 0 and value.name not in ["D3Q19", "D3Q27"]:
             raise ValueError("For 3D simulations, lattice must be D3Q19 or D3Q27")
         self._lattice = value
-
-    @property
-    def body_force(self):
-        return self._body_force
-
-    @body_force.setter
-    def body_force(self, value):
-        if value is None:
-            raise ValueError("Body force must be provided")
-        if not type(value).__name__ in ["NoBodyForce", "ShanChenBodyForce", "GuoBodyForce"]:
-            raise ValueError("Body force must be of type: NoBodyForce, ShanChenBodyForce or GuoBodyForce")
-        self._body_force = value
 
     @property
     def compute_precision(self):
@@ -251,7 +258,7 @@ class LBMBase(object):
         if value is None:
             raise ValueError("Precision value must be provided.")
         if value not in [jnp.float16, jnp.float32, jnp.float64]:
-            raise ValueError("Valid precision values are: \"f16\", \"f32\" or \"f64\"")
+            raise ValueError('Valid precision values are: "f16", "f32" or "f64"')
         self._compute_precision = value
 
     @property
@@ -263,7 +270,7 @@ class LBMBase(object):
         if value is None:
             raise ValueError("Write precison value must be provided.")
         if value not in [jnp.float16, jnp.float32, jnp.float64]:
-            raise ValueError("Valid presion values are: \"f16\", \"f32\" or \"f64\"")
+            raise ValueError('Valid presion values are: "f16", "f32" or "f64"')
         self._write_precision = value
 
     @property
@@ -385,51 +392,70 @@ class LBMBase(object):
         self._n_devices = value
 
     def set_precision(self, precision_str):
-        return {
-            "f16": jnp.float16,
-            "f32": jnp.float32,
-            "f64": jnp.float64
-        }.get(precision_str, jnp.float32)
+        return {"f16": jnp.float16, "f32": jnp.float32, "f64": jnp.float64}.get(
+            precision_str, jnp.float32
+        )
 
     def show_simulation_parameters(self):
         attributes_to_show = [
-            'omega', 'nx', 'ny', 'nz', 'd', 'lattice', 'compute_precision', 'write_precision',
-            'total_timesteps', 'checkpoint_rate', 'checkpoint_dir',
-            'restore_checkpoint', 'write_start', 'write_control', 'output_dir',
-            'compute_mlups', 'downsampling_factor', 'n_devices', 'backend'
+            "omega",
+            "nx",
+            "ny",
+            "nz",
+            "d",
+            "lattice",
+            "compute_precision",
+            "write_precision",
+            "total_timesteps",
+            "checkpoint_rate",
+            "checkpoint_dir",
+            "restore_checkpoint",
+            "write_start",
+            "write_control",
+            "output_dir",
+            "compute_mlups",
+            "downsampling_factor",
+            "n_devices",
+            "backend",
         ]
 
         descriptive_names = {
-            'omega': 'Omega',
-            'nx': 'Grid Points in X',
-            'ny': 'Grid Points in Y',
-            'nz': 'Grid Points in Z',
-            'd': 'Dimensionality',
-            'lattice': 'Lattice Type',
-            'compute_precision': 'Precision used for computation',
-            'write_precision': 'Precision used for writing the output files',
-            'total_timesteps': 'Total timesteps run in the simulation',
-            'checkpoint_rate': 'Rate at which files are generated',
-            'checkpoint_dir': 'Directory where checkpoint files are written',
-            'restore_checkpoint': 'Start simulation from a checkpoint instead of beginning',
-            'write_start': 'Timestep from which output export begins',
-            'write_control': 'The rate of output export in terms of timesteps',
-            'compute_mlups': 'Determines if the MLUPS will be computed',
-            'downsampling_factor': 'Downsampling factor used for the output.',
-            'n_devices': 'Number of Devices',
-            'backend': 'Backend'
+            "omega": "Omega",
+            "nx": "Grid Points in X",
+            "ny": "Grid Points in Y",
+            "nz": "Grid Points in Z",
+            "d": "Dimensionality",
+            "lattice": "Lattice Type",
+            "compute_precision": "Precision used for computation",
+            "write_precision": "Precision used for writing the output files",
+            "total_timesteps": "Total timesteps run in the simulation",
+            "checkpoint_rate": "Rate at which files are generated",
+            "checkpoint_dir": "Directory where checkpoint files are written",
+            "restore_checkpoint": "Start simulation from a checkpoint instead of beginning",
+            "write_start": "Timestep from which output export begins",
+            "write_control": "The rate of output export in terms of timesteps",
+            "compute_mlups": "Determines if the MLUPS will be computed",
+            "downsampling_factor": "Downsampling factor used for the output.",
+            "n_devices": "Number of Devices",
+            "backend": "Backend",
         }
         simulation_name = self.__class__.__name__
 
-        print(colored(f'**** Simulation Parameters for {simulation_name} ****', 'green'))
+        print(
+            colored(f"**** Simulation Parameters for {simulation_name} ****", "green")
+        )
         header = f"{colored('Parameter', 'blue'):>30} | {colored('Value', 'yellow')}"
         print(header)
-        print('-' * 50)
+        print("-" * 50)
 
         for attr in attributes_to_show:
-            value = getattr(self, attr, 'Attribute not set')
-            descriptive_name = descriptive_names.get(attr, attr)  # Use the attribute name as a fallback
-            row = f"{colored(descriptive_name, 'blue'):>30} | {colored(value, 'yellow')}"
+            value = getattr(self, attr, "Attribute not set")
+            descriptive_name = descriptive_names.get(
+                attr, attr
+            )  # Use the attribute name as a fallback
+            row = (
+                f"{colored(descriptive_name, 'blue'):>30} | {colored(value, 'yellow')}"
+            )
             print(row)
 
     def _create_boundary_data(self):
@@ -443,8 +469,14 @@ class LBMBase(object):
         """
         self.boundary_conditions = []
         self.set_boundary_conditions()
-        solid_halo_list = [np.array(bc.boundary_indices).T for bc in self.boundary_conditions if bc.is_solid]
-        solid_halo_voxels = np.unique(np.vstack(solid_halo_list), axis=0) if solid_halo_list else None
+        solid_halo_list = [
+            np.array(bc.boundary_indices).T
+            for bc in self.boundary_conditions
+            if bc.is_solid
+        ]
+        solid_halo_voxels = (
+            np.unique(np.vstack(solid_halo_list), axis=0) if solid_halo_list else None
+        )
 
         start = time.time()
         grid_mask = self.create_grid_mask(solid_halo_voxels)
@@ -452,7 +484,7 @@ class LBMBase(object):
 
         start = time.time()
         for bc in self.boundary_conditions:
-            assert bc.implementation_step in ['post_streaming', 'post_collision']
+            assert bc.implementation_step in ["post_streaming", "post_collision"]
             bc.create_local_mask_and_normal_arrays(grid_mask)
         print("Time to create the local masks and normal arrays:", time.time() - start)
 
@@ -494,7 +526,9 @@ class LBMBase(object):
             This indicates that the actual values should be set elsewhere.
         """
         print("Default initial conditions assumed: density = 1.0 and velocity = 0.0")
-        print("To set explicit initial values for velocity and density, use the self.initialize_macroscopic_fields function")
+        print(
+            "To set explicit initial values for velocity and density, use the self.initialize_macroscopic_fields function"
+        )
         return None, None
 
     def assign_fields_sharded(self):
@@ -511,9 +545,15 @@ class LBMBase(object):
             f: A distributed JAX array of shape: (self.nx, self.ny, self.q) for 2D and (self.nx, self.ny, self.nz, self.q) for 3D.
         """
         rho0, u0 = self.initialize_macroscopic_fields()
-        shape = (self.nx, self.ny, self.q) if self.d == 2 else (self.nx, self.ny, self.nz, self.q)
+        shape = (
+            (self.nx, self.ny, self.q)
+            if self.d == 2
+            else (self.nx, self.ny, self.nz, self.q)
+        )
         if rho0 is None or u0 is None:
-            f = self.distributed_array_init(shape, self.precision_policy.output_dtype, init_val=self.w)
+            f = self.distributed_array_init(
+                shape, self.precision_policy.output_dtype, init_val=self.w
+            )
         else:
             f = self.initialize_distribution(rho0, u0)
         return f
@@ -548,9 +588,14 @@ class LBMBase(object):
         hw_x = self.n_devices
         hw_y = hw_z = 1
         if self.d == 2:
-            grid_mask = self.distributed_array_init((self.nx + 2 * hw_x, self.ny + 2 * hw_y, self.lattice.q), jnp.bool_,
-                                                    init_val=True)
-            grid_mask = grid_mask.at[(slice(hw_x, -hw_x), slice(hw_y, -hw_y), slice(None))].set(False)
+            grid_mask = self.distributed_array_init(
+                (self.nx + 2 * hw_x, self.ny + 2 * hw_y, self.lattice.q),
+                jnp.bool_,
+                init_val=True,
+            )
+            grid_mask = grid_mask.at[
+                (slice(hw_x, -hw_x), slice(hw_y, -hw_y), slice(None))
+            ].set(False)
             if solid_halo_voxels is not None:
                 solid_halo_voxels = solid_halo_voxels.at[:, 0].add(hw_x)
                 solid_halo_voxels = solid_halo_voxels.at[:, 1].add(hw_y)
@@ -561,9 +606,23 @@ class LBMBase(object):
 
         elif self.d == 3:
             grid_mask = self.distributed_array_init(
-                (self.nx + 2 * hw_x, self.ny + 2 * hw_y, self.nz + 2 * hw_z, self.lattice.q), jnp.bool_, init_val=True)
-            grid_mask = grid_mask.at[(slice(hw_x, -hw_x), slice(hw_y, -hw_y), slice(hw_z, -hw_z), slice(None))].set(
-                False)
+                (
+                    self.nx + 2 * hw_x,
+                    self.ny + 2 * hw_y,
+                    self.nz + 2 * hw_z,
+                    self.lattice.q,
+                ),
+                jnp.bool_,
+                init_val=True,
+            )
+            grid_mask = grid_mask.at[
+                (
+                    slice(hw_x, -hw_x),
+                    slice(hw_y, -hw_y),
+                    slice(hw_z, -hw_z),
+                    slice(None),
+                )
+            ].set(False)
             if solid_halo_voxels is not None:
                 solid_halo_voxels = solid_halo_voxels.at[:, 0].add(hw_x)
                 solid_halo_voxels = solid_halo_voxels.at[:, 1].add(hw_y)
@@ -587,10 +646,14 @@ class LBMBase(object):
             # For a 2D grid, the bounding box consists of four edges: bottom, top, left, and right.
             # Each edge is represented as an array of indices. For example, the bottom edge includes
             # all points where the y-coordinate is 0, so its indices are [[i, 0] for i in range(self.nx)].
-            bounding_box = {"bottom": np.array([[i, 0] for i in range(self.nx)], dtype=int),
-                            "top": np.array([[i, self.ny - 1] for i in range(self.nx)], dtype=int),
-                            "left": np.array([[0, i] for i in range(self.ny)], dtype=int),
-                            "right": np.array([[self.nx - 1, i] for i in range(self.ny)], dtype=int)}
+            bounding_box = {
+                "bottom": np.array([[i, 0] for i in range(self.nx)], dtype=int),
+                "top": np.array([[i, self.ny - 1] for i in range(self.nx)], dtype=int),
+                "left": np.array([[0, i] for i in range(self.ny)], dtype=int),
+                "right": np.array(
+                    [[self.nx - 1, i] for i in range(self.ny)], dtype=int
+                ),
+            }
             return bounding_box
 
         elif self.d == 3:
@@ -598,12 +661,43 @@ class LBMBase(object):
             # Each face is represented as an array of indices. For example, the bottom face includes all points
             # where the z-coordinate is 0, so its indices are [[i, j, 0] for i in range(self.nx) for j in range(self.ny)].
             bounding_box = {
-                "bottom": np.array([[i, j, 0] for i in range(self.nx) for j in range(self.ny)], dtype=int),
-                "top": np.array([[i, j, self.nz - 1] for i in range(self.nx) for j in range(self.ny)], dtype=int),
-                "left": np.array([[0, j, k] for j in range(self.ny) for k in range(self.nz)], dtype=int),
-                "right": np.array([[self.nx - 1, j, k] for j in range(self.ny) for k in range(self.nz)], dtype=int),
-                "front": np.array([[i, 0, k] for i in range(self.nx) for k in range(self.nz)], dtype=int),
-                "back": np.array([[i, self.ny - 1, k] for i in range(self.nx) for k in range(self.nz)], dtype=int)}
+                "bottom": np.array(
+                    [[i, j, 0] for i in range(self.nx) for j in range(self.ny)],
+                    dtype=int,
+                ),
+                "top": np.array(
+                    [
+                        [i, j, self.nz - 1]
+                        for i in range(self.nx)
+                        for j in range(self.ny)
+                    ],
+                    dtype=int,
+                ),
+                "left": np.array(
+                    [[0, j, k] for j in range(self.ny) for k in range(self.nz)],
+                    dtype=int,
+                ),
+                "right": np.array(
+                    [
+                        [self.nx - 1, j, k]
+                        for j in range(self.ny)
+                        for k in range(self.nz)
+                    ],
+                    dtype=int,
+                ),
+                "front": np.array(
+                    [[i, 0, k] for i in range(self.nx) for k in range(self.nz)],
+                    dtype=int,
+                ),
+                "back": np.array(
+                    [
+                        [i, self.ny - 1, k]
+                        for i in range(self.nx)
+                        for k in range(self.nz)
+                    ],
+                    dtype=int,
+                ),
+            }
             return bounding_box
 
     def send_right(self, x, axis_name):
@@ -678,8 +772,13 @@ class LBMBase(object):
 
         """
         f = self.streaming_p(f)
-        left_comm, right_comm = f[:1, ..., self.lattice.right_indices], f[-1:, ..., self.lattice.left_indices]
-        left_comm, right_comm = self.send_right(left_comm, 'x'), self.send_left(right_comm, 'x')
+        left_comm, right_comm = (
+            f[:1, ..., self.lattice.right_indices],
+            f[-1:, ..., self.lattice.left_indices],
+        )
+        left_comm, right_comm = self.send_right(left_comm, "x"), self.send_left(
+            right_comm, "x"
+        )
         f = f.at[:1, ..., self.lattice.right_indices].set(left_comm)
         f = f.at[-1:, ..., self.lattice.left_indices].set(right_comm)
         return f
@@ -822,13 +921,15 @@ class LBMBase(object):
         if self.lattice.d == 2:
             mlups = (self.nx * self.ny * self.total_timesteps) / (t_total * 1e6)
         else:
-            mlups = (self.nx * self.ny * self.nz * self.total_timesteps) / (t_total * 1e6)
+            mlups = (self.nx * self.ny * self.nz * self.total_timesteps) / (
+                t_total * 1e6
+            )
         return mlups
 
     @partial(jit, static_argnums=(0,), donate_argnums=(1,))
     def step(self, f_poststreaming, timestep):
         """
-        Perform one step of LBM simulation. 
+        Perform one step of LBM simulation.
 
         Arguments:
             f_poststreaming: jax.numpy.ndarray
@@ -843,9 +944,13 @@ class LBMBase(object):
                 Post-collision distribution function.
         """
         f_postcollision = self.collision(f_poststreaming)
-        f_postcollision = self.apply_boundary_conditions(f_postcollision, f_poststreaming, timestep, "post_collision")
+        f_postcollision = self.apply_boundary_conditions(
+            f_postcollision, f_poststreaming, timestep, "post_collision"
+        )
         f_poststreaming = self.streaming(f_postcollision)
-        f_poststreaming = self.apply_boundary_conditions(f_poststreaming, f_postcollision, timestep, "post_streaming")
+        f_poststreaming = self.apply_boundary_conditions(
+            f_poststreaming, f_postcollision, timestep, "post_streaming"
+        )
 
         if self.return_post_col_dist:
             return f_poststreaming, f_postcollision
@@ -875,19 +980,31 @@ class LBMBase(object):
             if latest_step is not None:  # existing checkpoint present
                 # Assert that the checkpoint manager is not None
                 assert self.mngr is not None, "Checkpoint manager does not exist."
-                state = {'f': f}
-                shardings = jax.tree_map(lambda x: x.sharding, state)
-                restore_args = orb.checkpoint_utils.construct_restore_args(state, shardings)
+                state = {"f": f}
+                abstract_state = jax.tree_util.tree_map(
+                    orb.utils.to_shape_dtype_struct, state
+                )
+                # shardings = jax.tree_map(lambda x: x.sharding, state)
+                # restore_args = orb.checkpoint_utils.construct_restore_args(
+                #     state, shardings
+                # )
                 try:
-                    f = self.mngr.restore(latest_step, restore_kwargs={'restore_args': restore_args})['f']
+                    f = self.mngr.restore(
+                        latest_step,
+                        # restore_kwargs={"restore_args": restore_args},
+                        args=orb.args.StandardRestore(abstract_state),
+                    )["f"]
                     print(f"Restored checkpoint at step {latest_step}.")
                 except ValueError:
-                    raise ValueError(f"Failed to restore checkpoint at step {latest_step}.")
+                    raise ValueError(
+                        f"Failed to restore checkpoint at step {latest_step}."
+                    )
 
                 start_step = latest_step + 1
                 if not (self.total_timesteps > start_step):
                     raise ValueError(
-                        f"Simulation already exceeded maximum allowable steps (self.total_timesteps = {self.total_timesteps}). Consider increasing self.total_timesteps.")
+                        f"Simulation already exceeded maximum allowable steps (self.total_timesteps = {self.total_timesteps}). Consider increasing self.total_timesteps."
+                    )
 
         if self.compute_mlups:
             start = time.time()
@@ -895,9 +1012,15 @@ class LBMBase(object):
         # Loop over all time steps
         for timestep in range(start_step, self.total_timesteps + 1):
             io_flag = self.write_control > 0 and (
-                        (timestep - self.write_start) % self.write_control == 0 or timestep == self.total_timesteps)
-            print_iter_flag = self.print_info_rate > 0 and timestep % self.print_info_rate == 0
-            checkpoint_flag = self.checkpoint_rate > 0 and timestep % self.checkpoint_rate == 0
+                (timestep - self.write_start) % self.write_control == 0
+                or timestep == self.total_timesteps
+            )
+            print_iter_flag = (
+                self.print_info_rate > 0 and timestep % self.print_info_rate == 0
+            )
+            checkpoint_flag = (
+                self.checkpoint_rate > 0 and timestep % self.checkpoint_rate == 0
+            )
 
             if io_flag:
                 # Update the macroscopic variables and save the previous values (for error computation)
@@ -914,8 +1037,12 @@ class LBMBase(object):
             # Print the progress of the simulation
             if print_iter_flag:
                 print(
-                    colored("Timestep ", 'blue') + colored(f"{timestep}", 'green') + colored(" of ", 'blue') + colored(
-                        f"{self.total_timesteps}", 'green') + colored(" completed", 'blue'))
+                    colored("Timestep ", "blue")
+                    + colored(f"{timestep}", "green")
+                    + colored(" of ", "blue")
+                    + colored(f"{self.total_timesteps}", "green")
+                    + colored(" completed", "blue")
+                )
 
             if io_flag:
                 # Save the simulation data
@@ -933,9 +1060,11 @@ class LBMBase(object):
 
             if checkpoint_flag:
                 # Save the checkpoint
-                print(f"Saving checkpoint at timestep {timestep}/{self.total_timesteps}")
-                state = {'f': f}
-                self.mngr.save(timestep, state)
+                print(
+                    f"Saving checkpoint at timestep {timestep}/{self.total_timesteps}"
+                )
+                state = {"f": f}
+                self.mngr.save(timestep, args=orb.args.StandardSave(state))
 
             # Start the timer for the MLUPS computation after the first timestep (to remove compilation overhead)
             if self.compute_mlups and timestep == 1:
@@ -947,20 +1076,42 @@ class LBMBase(object):
             jax.block_until_ready(f)
             end = time.time()
             if self.d == 2:
-                print(colored("Domain: ", 'blue') + colored(f"{self.nx} x {self.ny}",
-                                                            'green') if self.d == 2 else colored(
-                    f"{self.nx} x {self.ny} x {self.nz}", 'green'))
-                print(colored("Number of voxels: ", 'blue') + colored(f"{self.nx * self.ny}",
-                                                                      'green') if self.d == 2 else colored(
-                    f"{self.nx * self.ny * self.nz}", 'green'))
-                print(colored("MLUPS: ", 'blue') + colored(
-                    f"{self.nx * self.ny * self.total_timesteps / (end - start) / 1e6}", 'red'))
+                print(
+                    colored("Domain: ", "blue")
+                    + colored(f"{self.nx} x {self.ny}", "green")
+                    if self.d == 2
+                    else colored(f"{self.nx} x {self.ny} x {self.nz}", "green")
+                )
+                print(
+                    colored("Number of voxels: ", "blue")
+                    + colored(f"{self.nx * self.ny}", "green")
+                    if self.d == 2
+                    else colored(f"{self.nx * self.ny * self.nz}", "green")
+                )
+                print(
+                    colored("MLUPS: ", "blue")
+                    + colored(
+                        f"{self.nx * self.ny * self.total_timesteps / (end - start) / 1e6}",
+                        "red",
+                    )
+                )
 
             elif self.d == 3:
-                print(colored("Domain: ", 'blue') + colored(f"{self.nx} x {self.ny} x {self.nz}", 'green'))
-                print(colored("Number of voxels: ", 'blue') + colored(f"{self.nx * self.ny * self.nz}", 'green'))
-                print(colored("MLUPS: ", 'blue') + colored(
-                    f"{self.nx * self.ny * self.nz * self.total_timesteps / (end - start) / 1e6}", 'red'))
+                print(
+                    colored("Domain: ", "blue")
+                    + colored(f"{self.nx} x {self.ny} x {self.nz}", "green")
+                )
+                print(
+                    colored("Number of voxels: ", "blue")
+                    + colored(f"{self.nx * self.ny * self.nz}", "green")
+                )
+                print(
+                    colored("MLUPS: ", "blue")
+                    + colored(
+                        f"{self.nx * self.ny * self.nz * self.total_timesteps / (end - start) / 1e6}",
+                        "red",
+                    )
+                )
 
         return f
 
@@ -990,7 +1141,7 @@ class LBMBase(object):
             "u": u,
             "u_prev": u_prev,
             "f_poststreaming": f,
-            "f_postcollision": fstar
+            "f_postcollision": fstar,
         }
         self.output_data(**kwargs)
 

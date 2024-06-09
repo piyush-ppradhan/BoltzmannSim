@@ -66,10 +66,8 @@ class Multiphase(BGK):
         self.G_fs = self.compute_fs_greens_function()
 
         # This is used for fluid-solid force computation
-        self.solid_mask_streamed = self.streaming(
-            jnp.repeat(
-                jnp.expand_dims(self.solid_mask, axis=-1), repeats=self.q, axis=-1
-            )
+        self.solid_mask_repeated = jnp.repeat(
+            jnp.expand_dims(self.solid_mask, axis=-1), repeats=self.q, axis=-1
         )
 
         self.omega = jnp.array(self.omega, dtype=self.precision_policy.compute_dtype)
@@ -319,25 +317,18 @@ class Multiphase(BGK):
         )
         # fmt:on
         f_tree = {}
-        if rho0_tree is not None:
+        if rho0_tree is not None and u0_tree is not None:
             assert (
                 len(rho0_tree) == self.n_components
             ), "The initial density values for all components must be provided"
 
-        if u0_tree is not None:
             assert (
                 len(u0_tree) == self.n_components
             ), "The initial velocity values for all components must be provided."
 
-        if rho0_tree is not None and u0_tree is not None:
             for i in range(self.n_components):
                 rho0, u0 = rho0_tree[i], u0_tree[i]
-                if rho0 is None or u0 is None:
-                    f_tree[i] = self.distributed_array_init(
-                        shape, self.precision_policy.output_dtype, init_val=self.w
-                    )
-                else:
-                    f_tree[i] = self.initialize_distribution(rho0, u0)
+                f_tree[i] = self.initialize_distribution(rho0, u0)
         else:
             for i in range(self.n_components):
                 f_tree[i] = self.distributed_array_init(
@@ -381,6 +372,32 @@ class Multiphase(BGK):
         return rho_tree, u_tree
 
     @partial(jit, static_argnums=(0,))
+    def compute_common_velocity(self, rho_tree, u_tree):
+        """
+        Compute the common velocity using component velocity and density values.
+
+        Arguments:
+            rho_tree: Pytree of jax.numpy.ndarray
+                Pytree of component density values.
+            u_tree: Pytree of jax.numpy.ndarray
+                Pytree of component velocity values.
+
+        Returns:
+            jax.numpy.ndarray
+                Common velocity values.
+        """
+        n = tree_reduce(
+            operator.add,
+            tree_map(
+                lambda omega, rho, u: rho * u * omega, self.omega, rho_tree, u_tree
+            ),
+        )
+        d = tree_reduce(
+            operator.add, tree_map(lambda omega, rho: rho * omega, self.omega, rho_tree)
+        )
+        return n / d
+
+    @partial(jit, static_argnums=(0,))
     def EOS(self, rho_tree):
         """
         Define the equation of state for the problem. Defined in sub-classes.
@@ -393,6 +410,7 @@ class Multiphase(BGK):
             p_tree: pytree of jax.numpy.ndarray
                 Pytree of pressure values.
         """
+        pass
 
     @partial(jit, static_argnums=(0,))
     def compute_psi(self, rho_tree):
@@ -411,14 +429,16 @@ class Multiphase(BGK):
             lambda rho: self.precision_policy.cast_to_compute(rho), rho_tree
         )
         p_tree = self.EOS(rho_tree)
-        g = list(self.g_kkprime.diagonal())
+        g_tree = list(self.g_kkprime.diagonal())
         psi = (
             lambda p, rho, g: (
                 2 * (p - self.lattice.c_s2 * rho) / (self.lattice.c_s2 * g)
             )
             ** 0.5
         )
-        psi_tree = tree_map(psi, p_tree, rho_tree, g)
+        psi_tree = tree_map(
+            psi, p_tree, rho_tree, g_tree
+        )  # Exact value of g does not matter
         return psi_tree
 
     # Compute the force using the effective mass (psi) and the interaction potential (phi)
@@ -464,18 +484,17 @@ class Multiphase(BGK):
             """
             g_kkprime is a row of self.gkkprime, as it represents the interaction between kth component with all components
             """
-            return tree_reduce(
-                operator.add,
-                tree_map(
-                    lambda g_kkprime_, psi_s: jnp.dot(
-                        g_kkprime_ * self.G_kkprime * psi_s, self.e
-                    ),
-                    list(g_kkprime),
-                    psi_s_tree,
-                ),
+            return tree_map(
+                lambda g_kkp, psi_s: jnp.dot(g_kkp * self.G_fs * psi_s, self.e),
+                list(g_kkprime),
+                psi_s_tree,
             )
 
-        return jax.vmap(ffk, in_axes=0)(self.g_kkprime)
+        return tree_map(
+            lambda psi, in_t: -psi * in_t,
+            psi_tree,
+            list(jax.vmap(ffk, in_axes=0)(self.g_kkprime)),
+        )
 
     @partial(jit, static_argnums=(0,))
     def compute_fluid_solid_force(self, rho_tree):
@@ -491,7 +510,7 @@ class Multiphase(BGK):
                 Pytree of fluid-solid interaction force.
         """
         neighbor_terms = tree_map(
-            lambda g_ks: jnp.dot(g_ks * self.G_ks * self.solid_mask_streamed, self.e),
+            lambda g_ks: jnp.dot(g_ks * self.G_fs * self.solid_mask_repeated, self.e),
             self.g_ks,
         )
         return tree_map(lambda rho: -rho * neighbor_terms, rho_tree)
@@ -633,15 +652,23 @@ class Multiphase(BGK):
             if latest_step is not None:  # existing checkpoint present
                 # Assert that the checkpoint manager is not None
                 assert self.mngr is not None, "Checkpoint manager does not exist."
-                shardings = jax.tree_map(lambda x: x.sharding, f_tree)
-                restore_args = orb.checkpoint_utils.construct_restore_args(
-                    f_tree, shardings
+                state = {}
+                c_name = lambda i: f"component_{i}"
+                for i in range(self.n_components):
+                    state[c_name(i)] = f_tree[i]
+                # shardings = jax.tree_map(lambda x: x.sharding, f_tree)
+                # restore_args = orb.checkpoint_utils.construct_restore_args(
+                #     f_tree, shardings
+                # )
+                abstract_state = jax.tree_util.tree_map(
+                    orb.utils.to_shape_dtype_struct, state
                 )
                 try:
-                    for i in range(self.n_components):
-                        f_tree[i] = self.mngr.restore(
-                            latest_step, restore_kwargs={"restore_args": restore_args}
-                        )[i]
+                    f_tree = self.mngr.restore(
+                        latest_step,
+                        # restore_kwargs={"restore_args": restore_args},
+                        args=orb.args.StandardSave(abstract_state),
+                    )
                     print(f"Restored checkpoint at step {latest_step}.")
                 except ValueError:
                     raise ValueError(
@@ -790,7 +817,12 @@ class Multiphase(BGK):
                 print(
                     f"Saving checkpoint at timestep {timestep}/{self.total_timesteps}"
                 )
-                self.mngr.save(timestep, f_tree)
+                state = {}
+                c_name = lambda i: f"component_{i}"
+                for i in range(self.n_components):
+                    state[c_name(i)] = f_tree[i]
+
+                self.mngr.save(timestep, args=orb.args.StandardSave(state))
 
             # Start the timer for the MLUPS computation after the first timestep (to remove compilation overhead)
             if self.compute_mlups and timestep == 1:
