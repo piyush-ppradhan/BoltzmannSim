@@ -119,8 +119,10 @@ class Multiphase(BGK):
 
     @g_kkprime.setter
     def g_kkprime(self, value):
-        if not isinstance(value, np.ndarray):
-            raise ValueError("g_kkprime must be a numpy array")
+        if not isinstance(value, np.ndarray) and not isinstance(
+            value, jax.numpy.ndarray
+        ):
+            raise ValueError("g_kkprime must be a numpy array or jax.numpy.ndarray")
         if np.shape(value) != (self.n_components, self.n_components):
             raise ValueError(
                 "g_kkprime must be a matrix of size n_components x n_components"
