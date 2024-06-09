@@ -644,9 +644,9 @@ class Multiphase(BGK):
             f_tree: pytree of jax.numpy.ndarray
                 pytree of distribution functions after the simulation.
         """
-        f_tree = {}
+        f_tree = []
         for i in range(self.n_components):
-            f_tree[i] = self.assign_fields_sharded()
+            f_tree[i].append(self.assign_fields_sharded())
         start_step = 0
         if self.restore_checkpoint:
             latest_step = self.mngr.latest_step()
